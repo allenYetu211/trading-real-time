@@ -1,0 +1,88 @@
+---
+description: 功能实现文档规范（需求、设计、任务）
+globs:
+  - "specs/**/*.md"
+  - "tasks/**/*.md"
+alwaysApply: true
+---
+
+## ⛳ 功能规范规则
+
+### 📌 通用结构
+
+每个功能必须包含以下 3 个文档：
+
+- `specs/<feature>/<feature>.requirements.md`（需求文档）
+- `specs/<feature>/<feature>.design.md`（设计文档）
+- `tasks/<feature>/<feature>.tasklist.md`（任务清单）
+
+所有文件名必须使用 kebab-case（短横线命名法）。
+所有文档必须以 `# <功能名称>` 作为标题开头。
+
+---
+
+## 📘 1. 需求文件
+
+### ✅ 文件路径格式：`specs/<feature>/<feature>.requirements.md`
+
+#### 必须包含的章节：
+
+- `## 用户故事`  
+  - 必须使用 EARS 格式书写：  
+    > *作为 \<用户类型>，我希望 \<功能>，以便 \<价值>。*
+- `## 验收标准`  
+  - 至少包含 3 条明确的要点，使用 MUST/SHOULD 语气。
+  - 验收标准必须可测试（推荐使用 Gherkin 或 Given-When-Then 风格）。
+
+#### 规范校验规则：
+
+- ❌ 缺少 EARS 格式 → ❗错误
+- ❌ 验收标准少于 3 条 → ⚠️ 警告
+
+---
+
+## 🏗 2. 设计文件
+
+### ✅ 文件路径格式：`specs/<feature>/<feature>.design.md`
+
+#### 必须包含的章节：
+
+- `## 架构`
+  - 包含高层次技术栈说明和 NestJS 模块设计
+  - 必须提及 controller、service、dto 的结构
+- `## 实现计划`
+  - 逐步的代码模块映射（文件/函数）
+  - 可选：包含 `mermaid` 结构图
+
+#### 规范校验规则：
+
+- ❌ 缺少 controller/service/dto → ❗错误
+- ❌ 无清晰实现步骤 → ⚠️ 警告
+
+---
+
+## 📋 3. 任务文件
+
+### ✅ 文件路径格式：`tasks/<feature>/<feature>.tasklist.md`
+
+#### 必须结构：
+
+- 以复选框 `- [ ]` 格式列出所有开发动作
+- 任务应细化、可追踪，且与设计对应
+- 建议使用前缀标明任务类型：
+  - `[DTO]` 数据结构相关
+  - `[Service]` 业务逻辑相关
+  - `[Controller]` 路由相关
+  - `[Test]` 单元测试或端到端测试
+- 示例：
+  ```md
+  - [ ] [DTO] 创建 LoginDto
+  - [ ] [Service] 实现 AuthService.validateUser
+  - [ ] [Test] 编写 POST /auth/login 的 e2e 测试
+
+
+
+本项目使用以下规则文件：
+- `@instruction-design.mdc`：设计文档示例
+- `@instruction-requirements.mdc`：使用 EARS 语法的用户故事 + 可验收标准（Acceptance Criteria）
+- `@instruction-tasklist.mdc`：	具体任务拆解 + 可追踪步骤（便于分配、验收）

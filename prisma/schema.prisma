@@ -1,0 +1,167 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 币种配置表
+model CoinConfig {
+  id        Int      @id @default(autoincrement())
+  symbol    String   @db.VarChar(20)
+  interval  String   @db.VarChar(10)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([symbol, interval])
+  @@map("coin_configs")
+}
+
+// K线数据表
+model KlineData {
+  id                      Int      @id @default(autoincrement())
+  symbol                  String   @db.VarChar(20)
+  interval                String   @db.VarChar(10)
+  openTime                BigInt   @map("open_time")
+  closeTime               BigInt   @map("close_time")
+  openPrice               Decimal  @db.Decimal(20, 8) @map("open_price")
+  highPrice               Decimal  @db.Decimal(20, 8) @map("high_price")
+  lowPrice                Decimal  @db.Decimal(20, 8) @map("low_price")
+  closePrice              Decimal  @db.Decimal(20, 8) @map("close_price")
+  volume                  Decimal  @db.Decimal(20, 8)
+  quoteAssetVolume        Decimal  @db.Decimal(20, 8) @map("quote_asset_volume")
+  numberOfTrades          Int      @map("number_of_trades")
+  takerBuyBaseAssetVolume Decimal  @db.Decimal(20, 8) @map("taker_buy_base_asset_volume")
+  takerBuyQuoteAssetVolume Decimal @db.Decimal(20, 8) @map("taker_buy_quote_asset_volume")
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  @@unique([symbol, interval, openTime])
+  @@index([symbol, interval, openTime])
+  @@map("kline_data")
+}
+
+// 分析结果表
+model AnalysisResult {
+  id                Int      @id @default(autoincrement())
+  symbol            String   @db.VarChar(20)
+  interval          String   @db.VarChar(10)
+  timestamp         BigInt
+  trendScore        Decimal  @db.Decimal(5, 2) @map("trend_score")
+  momentumScore     Decimal  @db.Decimal(5, 2) @map("momentum_score")
+  volatilityScore   Decimal  @db.Decimal(5, 2) @map("volatility_score")
+  signal            String   @db.VarChar(20)
+  confidence        Decimal  @db.Decimal(5, 2)
+  patterns          String?  @db.Text
+  supportResistance String?  @db.Text @map("support_resistance")
+  summary           String?  @db.Text
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([symbol, interval, timestamp])
+  @@map("analysis_results")
+}
+
+// 策略信号表
+model StrategySignal {
+  id             Int      @id @default(autoincrement())
+  symbol         String   @db.VarChar(20)
+  interval       String   @db.VarChar(10)
+  strategyType   String   @db.VarChar(50) @map("strategy_type")
+  signalType     String   @db.VarChar(20) @map("signal_type")
+  price          Decimal  @db.Decimal(20, 8)
+  confidence     Decimal  @db.Decimal(3, 2)
+  recommendation String   @db.Text
+  upperLevel     Decimal? @db.Decimal(20, 8) @map("upper_level")
+  lowerLevel     Decimal? @db.Decimal(20, 8) @map("lower_level")
+  stopLoss       Decimal? @db.Decimal(20, 8) @map("stop_loss")
+  takeProfit     Decimal? @db.Decimal(20, 8) @map("take_profit")
+  note           String?  @db.Text
+  timestamp      BigInt
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([symbol, strategyType, createdAt])
+  @@map("strategy_signals")
+}
+
+// 策略配置表
+model StrategyConfig {
+  id               Int      @id @default(autoincrement())
+  name             String   @db.VarChar(100)
+  type             String   @db.VarChar(50) @map("strategy_type")
+  status           String   @db.VarChar(20) @default("INACTIVE")
+  symbol           String   @db.VarChar(20)
+  interval         String   @db.VarChar(10)
+  parameters       String   @db.Text  // JSON字符串存储策略参数
+  riskManagement   String   @db.Text  @map("risk_management") // JSON字符串存储风险管理配置
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  // 关联的策略信号
+  signals          StrategySignalRecord[]
+  // 关联的回测结果
+  backtests        StrategyBacktest[]
+
+  @@index([symbol, interval, status])
+  @@map("strategy_configs")
+}
+
+// 策略信号记录表
+model StrategySignalRecord {
+  id           Int      @id @default(autoincrement())
+  strategyId   Int      @map("strategy_id")
+  symbol       String   @db.VarChar(20)
+  interval     String   @db.VarChar(10)
+  signal       String   @db.VarChar(20)
+  side         String   @db.VarChar(10)
+  price        Decimal  @db.Decimal(20, 8)
+  quantity     Decimal? @db.Decimal(20, 8)
+  confidence   Decimal  @db.Decimal(5, 2)
+  stopLoss     Decimal? @db.Decimal(20, 8) @map("stop_loss")
+  takeProfit   Decimal? @db.Decimal(20, 8) @map("take_profit")
+  reason       String   @db.Text
+  timestamp    BigInt
+  executed     Boolean  @default(false)
+  executedAt   DateTime? @map("executed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // 关联策略配置
+  strategy     StrategyConfig @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@index([strategyId, symbol, interval, timestamp])
+  @@index([executed, createdAt])
+  @@map("strategy_signal_records")
+}
+
+// 策略回测表
+model StrategyBacktest {
+  id            Int      @id @default(autoincrement())
+  strategyId    Int      @map("strategy_id")
+  symbol        String   @db.VarChar(20)
+  interval      String   @db.VarChar(10)
+  startTime     DateTime @map("start_time")
+  endTime       DateTime @map("end_time")
+  totalTrades   Int      @map("total_trades")
+  winningTrades Int      @map("winning_trades")
+  losingTrades  Int      @map("losing_trades")
+  winRate       Decimal  @db.Decimal(5, 2) @map("win_rate")
+  totalReturn   Decimal  @db.Decimal(10, 4) @map("total_return")
+  maxDrawdown   Decimal  @db.Decimal(5, 2) @map("max_drawdown")
+  sharpeRatio   Decimal  @db.Decimal(8, 4) @map("sharpe_ratio")
+  trades        String   @db.Text  // JSON字符串存储交易记录
+  summary       String   @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // 关联策略配置
+  strategy      StrategyConfig @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@index([strategyId, symbol, interval])
+  @@map("strategy_backtests")
+}

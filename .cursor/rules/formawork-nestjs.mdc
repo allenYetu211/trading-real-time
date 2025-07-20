@@ -1,0 +1,243 @@
+---
+globs: "*.ts,*.js"
+description: "NestJS 开发模式和最佳实践 ｜  架构设计原色 - 装饰器使用、依赖注入、异常处理等"
+---
+
+# NestJS 开发模式
+
+## 装饰器使用规范
+
+### 1. Controller 装饰器
+```typescript
+// 正确：简洁的装饰器使用
+@Controller('wallets')
+@UseGuards(JwtAuthGuard, RolesGuard)
+export class WalletsController {
+  @Post('list')
+  @Roles('admin', 'wallet_user')
+  async getWalletsList(@Body() queryDto: QueryWalletDto) {
+    // 实现
+  }
+}
+
+// 错误：重复的验证配置
+@Post('list')
+@UsePipes(new ValidationPipe({ transform: true })) // 不需要，已有全局配置
+@HttpCode(HttpStatus.OK) // 不需要，默认就是200
+async getWalletsList(@Body(new ValidationPipe()) queryDto: QueryWalletDto) {
+  // 实现
+}
+```
+
+### 2. DTO 验证装饰器
+```typescript
+// 正确：清晰的验证规则
+export class CreateWalletDto {
+  @IsString({ message: '钱包地址必须是字符串' })
+  @IsNotEmpty({ message: '钱包地址不能为空' })
+  address: string;
+
+  @IsEnum(ChainType, { message: '不支持的链类型' })
+  chain: ChainType;
+}
+```
+
+## 依赖注入模式
+
+### 1. Service 注入
+```typescript
+// 正确：构造函数注入
+@Injectable()
+export class WalletsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly encryptionService: EncryptionService,
+  ) {}
+}
+
+// 错误：属性注入（除非特殊情况）
+@Injectable()
+export class WalletsService {
+  @Inject(PrismaService)
+  private prisma: PrismaService; // 避免这种方式
+}
+```
+
+### 2. 模块导出规范
+```typescript
+// 正确：明确的导入导出
+@Module({
+  imports: [SharedModule],
+  controllers: [TokenBalancesController],
+  providers: [TokenBalancesService],
+  exports: [TokenBalancesService], // 导出给其他模块使用
+})
+export class TokenBalancesModule {}
+```
+
+## 异常处理模式
+
+### 1. 业务异常
+```typescript
+// 正确：使用 NestJS 内置异常
+if (!wallet) {
+  throw new NotFoundException('钱包不存在');
+}
+
+if (user.role !== 'admin') {
+  throw new ForbiddenException('权限不足');
+}
+
+// 错误：直接抛出 Error
+throw new Error('钱包不存在'); // 不推荐
+```
+
+### 2. 参数验证
+```typescript
+// 正确：依赖 DTO 验证，service 中只处理业务逻辑
+async updateWallet(dto: UpdateWalletDto) {
+  // dto 已经通过全局 ValidationPipe 验证
+  const wallet = await this.findWallet(dto.address);
+  return this.performUpdate(wallet, dto);
+}
+
+// 错误：在 service 中重复验证
+async updateWallet(dto: UpdateWalletDto) {
+  if (!dto.address) {
+    throw new BadRequestException('地址不能为空'); // 应该在DTO中验证
+  }
+}
+```
+
+## 中间件和守卫模式
+
+### 1. 权限守卫
+```typescript
+// 正确：守卫只验证权限，不处理业务逻辑
+@Injectable()
+export class RolesGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean {
+    const requiredRoles = this.reflector.get(ROLES_KEY, context.getHandler());
+    const user = context.switchToHttp().getRequest().user;
+    return requiredRoles.includes(user.role);
+  }
+}
+```
+
+### 2. 拦截器使用
+```typescript
+// 正确：响应格式统一在全局拦截器处理
+// 在 main.ts 中配置，controller 中不需要处理格式
+app.useGlobalInterceptors(new TransformInterceptor());
+```
+
+## 错误处理最佳实践
+
+### 1. 全局异常过滤器
+- 在 [src/shared/filters/http-exception.filter.ts](mdc:src/shared/filters/http-exception.filter.ts) 中统一处理
+- Controller 中抛出标准的 NestJS 异常
+- 不在 Controller 中处理异常格式化
+
+### 2. 业务逻辑异常
+- Service 层抛出具体的业务异常
+- 使用语义化的异常类型
+- 提供有意义的错误消息
+
+## 模块组织模式
+
+### 1. 功能模块结构
+```
+src/modules/wallets/
+├── dto/
+├── guards/
+├── service/
+├── wallets.controller.ts
+├── wallets.service.ts
+└── wallets.module.ts
+```
+
+### 2. 共享模块结构
+```
+src/shared/
+├── decorators/
+├── enums/
+├── filters/
+├── guards/
+├── interceptors/
+└── utils/
+```
+
+
+# 架构设计原则
+
+#  请严格遵守SOLID和DRY原则，组合大于继承 。
+
+## SOLID 原则应用
+
+### 1. 单一职责原则 (SRP)
+- Controller 只负责路由和参数验证，不包含业务逻辑
+- Service 负责业务逻辑实现，不直接处理HTTP请求
+- DTO 只负责数据传输和验证，不包含业务方法
+- Guard 只负责权限验证，不处理业务逻辑
+
+### 2. 开闭原则 (OCP)
+- 使用枚举和配置化方式支持新的链类型
+- 通过接口抽象支持不同的加密服务
+- 使用策略模式处理不同链的余额查询
+
+### 3. 依赖倒置原则 (DIP)
+- 依赖抽象而非具体实现
+- 使用 NestJS 的依赖注入容器
+- 模块间通过接口通信
+
+## DRY 原则应用
+
+### 1. 配置统一化
+- 全局 ValidationPipe 配置在 [main.ts](mdc:src/main.ts)
+- 全局 TransformInterceptor 统一响应格式
+- 全局 HttpExceptionFilter 统一错误处理
+
+### 2. 代码复用
+- 共享枚举定义在 [src/shared/enums/](mdc:src/shared/enums/)
+- 公共工具类在 [src/shared/utils/](mdc:src/shared/utils/)
+- 通用装饰器在 [src/shared/decorators/](mdc:src/shared/decorators/)
+
+### 3. 避免重复
+- 不在多个地方定义相同的枚举
+- 不在每个 Controller 中重复配置验证管道
+- 不重复实现相同的业务逻辑
+
+## 模块化原则
+
+### 1. 模块职责分离
+- 认证模块：[src/modules/auth/](mdc:src/modules/auth/)
+- 钱包管理：[src/modules/wallets/](mdc:src/modules/wallets/)
+- 权限管理：[src/modules/permissions/](mdc:src/modules/permissions/)
+- Token持仓：[src/modules/token-balances/](mdc:src/modules/token-balances/)
+
+### 2. 共享模块
+- 数据库服务：[src/shared/prisma/](mdc:src/shared/prisma/)
+- 加密服务：[src/shared/encryption/](mdc:src/shared/encryption/)
+- 公共装饰器和工具：[src/shared/](mdc:src/shared/)
+
+### 3. 模块间通信
+- 避免直接依赖其他模块的内部实现
+- 通过共享的服务或事件进行通信
+- 使用明确的接口定义
+
+## 数据库设计原则
+
+### 1. 一致性
+- 字段命名使用下划线格式
+- 时间字段统一使用 `created_at`, `updated_at`
+- 主键统一使用 UUID
+
+### 2. 扩展性
+- 使用枚举约束而非硬编码字符串
+- 预留扩展字段，如 `note` 字段
+- 支持软删除模式
+
+### 3. 性能优化
+- 合理设计索引，特别是联合索引
+- 避免过度规范化
+- 考虑查询模式设计表结构

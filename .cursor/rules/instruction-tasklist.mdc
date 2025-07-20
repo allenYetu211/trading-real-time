@@ -1,0 +1,17 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+
+### 必备内容：
+
+- 所有任务以 `- [ ]` Markdown checkbox 列出
+- 任务需可追踪、可执行，建议使用模块前缀标识：
+
+#### ✅ 示例格式：
+```md
+- [ ] [DTO] 创建 LoginDto
+- [ ] [Service] 实现 AuthService.validateUser
+- [ ] [Controller] 增加 POST /auth/login 接口
+- [ ] [Test] 编写 e2e 测试用例

@@ -1,0 +1,27 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+
+### 必备内容：
+
+#### 1. `## 系统架构（Architecture）`
+- 描述模块结构、控制器、服务、DTO 的设计
+- 使用 NestJS 模块化架构
+- 建议使用 `mermaid` 图可视化依赖关系
+
+#### 2. `## 实现方案（Implementation Plan）`
+- 每个模块的实现步骤
+- 详细说明涉及的文件 / 方法
+
+### ⛔ 检查规则：
+
+- ❌ 未提及 controller/service/dto 结构 → 报错 ❗
+- ⚠️ 实现步骤不清晰 → 警告
+
+---
+
+## 📋 三、任务清单（Tasks）
+
+### ✅ 文件路径格式：
