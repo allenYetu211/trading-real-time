@@ -138,9 +138,11 @@ export class WebSocketService implements OnModuleInit, OnModuleDestroy {
     if (streams.length === 0) return;
 
     const connectionKey = 'multi_klines';
+    // 使用正确的币安WebSocket流URL格式
     const wsUrl = `${this.baseUrl}/stream?streams=${streams.join('/')}`;
     
     this.logger.log(`批量订阅K线数据流: ${streams.length}个流`);
+    this.logger.log(`WebSocket URL: ${wsUrl}`);
 
     const ws = new WebSocket(wsUrl);
     this.connections.set(connectionKey, ws);
@@ -195,18 +197,40 @@ export class WebSocketService implements OnModuleInit, OnModuleDestroy {
         takerBuyQuoteAssetVolume: parseFloat(event.k.Q),
       };
 
+      // 实时价格显示
+      this.displayRealtimePrice(klineData, event.k.x);
+
       // 只有K线完结时才保存到数据库
       if (event.k.x) {
         await this.dataStorageService.saveKline(klineData);
-        this.logger.debug(`保存完结K线: ${klineData.symbol} ${klineData.interval} ${new Date(klineData.openTime).toISOString()}`);
+        this.logger.log(`💾 [完结] ${klineData.symbol}(${klineData.interval}) $${klineData.closePrice} 📊 交易次数:${klineData.numberOfTrades}`);
       }
 
       // 实时更新缓存（无论是否完结）
       await this.cacheService.cacheLatestPrice(klineData.symbol, klineData.closePrice);
       
-      this.logger.debug(`处理K线事件: ${klineData.symbol} ${klineData.interval} 价格: ${klineData.closePrice} 完结: ${event.k.x}`);
     } catch (error) {
       this.logger.error('处理K线事件失败:', error);
+    }
+  }
+
+  /**
+   * 显示实时价格
+   */
+  private displayRealtimePrice(klineData: KlineData, isFinal: boolean): void {
+    const priceChange = klineData.closePrice - klineData.openPrice;
+    const priceChangePercent = (priceChange / klineData.openPrice * 100);
+    const changeIcon = priceChange >= 0 ? '📈' : '📉';
+    const statusIcon = isFinal ? '✅' : '🔄';
+    const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    
+    const message = `${statusIcon} [${time}] ${klineData.symbol}(${klineData.interval}) $${klineData.closePrice} ${changeIcon} ${priceChangePercent >= 0 ? '+' : ''}${priceChangePercent.toFixed(2)}%`;
+    
+    // 完结的K线使用LOG级别，实时更新使用DEBUG级别
+    if (isFinal) {
+      this.logger.log(`🎯 ${message}`);
+    } else {
+      this.logger.debug(`📊 ${message}`);
     }
   }
 

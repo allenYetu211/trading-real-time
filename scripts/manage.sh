@@ -48,7 +48,15 @@ dev_start() {
     
     # 启动应用
     log_info "启动NestJS应用..."
+    log_info "🚀 系统将自动订阅活跃配置并开始实时数据监控"
+    log_info "📊 实时数据将显示在控制台中"
     pnpm start:dev
+}
+
+# 测试WebSocket连接
+test_websocket() {
+    log_info "测试币安WebSocket连接..."
+    npx ts-node scripts/test-websocket.ts
 }
 
 # 停止开发环境
@@ -446,6 +454,7 @@ show_help() {
     echo ""
     echo "API测试:"
     echo "  test          测试所有API功能"
+    echo "  test-ws       测试WebSocket连接"
     echo "  add           添加币种配置"
     echo "  refresh       刷新数据"
     echo "  kline         获取K线数据"
@@ -510,6 +519,9 @@ main() {
             ;;
         test)
             test_api
+            ;;
+        test-ws)
+            test_websocket
             ;;
         add)
             add_config "$2" "$3" "$4"
