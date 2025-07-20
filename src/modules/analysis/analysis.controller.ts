@@ -365,4 +365,28 @@ export class AnalysisController {
       );
     }
   }
+
+  @Post('scheduled/comprehensive')
+  @ApiOperation({ summary: '手动触发综合多周期分析' })
+  @ApiResponse({ 
+    status: 200, 
+    description: '成功触发综合多周期分析'
+  })
+  async triggerComprehensiveAnalysis(): Promise<{ message: string }> {
+    try {
+      // 异步执行，不阻塞响应
+      setImmediate(() => {
+        this.scheduledAnalysisService.triggerComprehensiveAnalysis();
+      });
+      
+      return {
+        message: '综合多周期分析已触发，将在5分钟内获取5m、15m、1h、4h周期数据并进行综合分析，请稍后查看 Telegram 通知结果'
+      };
+    } catch (error) {
+      throw new HttpException(
+        `触发综合多周期分析失败: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
 } 

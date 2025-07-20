@@ -356,6 +356,124 @@ export class NotificationService {
   }
 
   /**
+   * 发送多时间周期分析通知
+   */
+  async sendMultiTimeframeAnalysisNotification(
+    symbol: string,
+    analysisData: Array<{
+      interval: string;
+      signal: string;
+      confidence: number;
+      trend: number;
+      momentum: number;
+      patterns: any[];
+      keyLevels: any[];
+    }>,
+    summary: {
+      avgConfidence: number;
+      strongSignalsCount: number;
+      consistentSignals: string[];
+      timestamp: string;
+    }
+  ): Promise<void> {
+    try {
+      // 创建综合通知数据
+      const notification: NotificationData = {
+        title: `📊 ${symbol} 多周期综合分析`,
+        message: this.formatMultiTimeframeMessage(analysisData, summary),
+        type: summary.avgConfidence >= 70 ? 'success' : 
+              summary.avgConfidence >= 50 ? 'info' : 'warning',
+        timestamp: summary.timestamp,
+        data: {
+          symbol,
+          multiTimeframe: true,
+          analysisData,
+          summary
+        }
+      };
+
+      await Promise.all([
+        this.saveToDatabase(notification),
+        this.sendTelegramMultiTimeframeNotification(symbol, analysisData, summary),
+      ]);
+
+    } catch (error) {
+      this.logger.error(`发送多时间周期分析通知失败 ${symbol}:`, error);
+    }
+  }
+
+  /**
+   * 格式化多时间周期消息
+   */
+  private formatMultiTimeframeMessage(
+    analysisData: Array<{
+      interval: string;
+      signal: string;
+      confidence: number;
+      trend: number;
+      momentum: number;
+      patterns: any[];
+      keyLevels: any[];
+    }>,
+    summary: {
+      avgConfidence: number;
+      strongSignalsCount: number;
+      consistentSignals: string[];
+      timestamp: string;
+    }
+  ): string {
+    const signalSummary = analysisData.map(data => 
+      `${data.interval}: ${data.signal}(${data.confidence}%)`
+    ).join(', ');
+
+    let message = `多周期分析完成，平均置信度: ${summary.avgConfidence}%`;
+    
+    if (summary.strongSignalsCount > 0) {
+      message += `，${summary.strongSignalsCount}个强信号`;
+    }
+    
+    if (summary.consistentSignals.length > 0) {
+      message += `，一致信号: ${summary.consistentSignals.join(', ')}`;
+    }
+
+    message += `。详情: ${signalSummary}`;
+
+    return message;
+  }
+
+  /**
+   * 发送Telegram多时间周期通知
+   */
+  private async sendTelegramMultiTimeframeNotification(
+    symbol: string,
+    analysisData: Array<{
+      interval: string;
+      signal: string;
+      confidence: number;
+      trend: number;
+      momentum: number;
+      patterns: any[];
+      keyLevels: any[];
+    }>,
+    summary: {
+      avgConfidence: number;
+      strongSignalsCount: number;
+      consistentSignals: string[];
+      timestamp: string;
+    }
+  ): Promise<void> {
+    try {
+      await this.telegramService.sendMultiTimeframeAnalysisNotification(
+        symbol,
+        analysisData,
+        summary
+      );
+    } catch (error) {
+      this.logger.error('发送 Telegram 多时间周期通知失败:', error);
+    }
+  }
+
+  /**
    * 发送邮件通知 (可扩展)
    */
   private async sendEmailNotification(data: NotificationData): Promise<void> {

@@ -17,7 +17,12 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:telegram": "npx ts-node scripts/test-telegram.ts",
+    "test:telegram-commands": "npx ts-node scripts/test-telegram-commands.ts",
+    "test:telegram-menu": "npx ts-node scripts/test-telegram-menu.ts",
+    "test:analysis": "npx ts-node scripts/test-realtime-analysis.ts",
+    "test:api": "npx ts-node scripts/test-api.ts"
   },
   "dependencies": {
     "@nestjs/cache-manager": "^3.0.1",

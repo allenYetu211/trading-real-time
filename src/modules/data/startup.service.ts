@@ -19,11 +19,11 @@ export class StartupService implements OnApplicationBootstrap {
     private readonly notificationService: NotificationService,
   ) {}
 
-  async onApplicationBootstrap() {
-    // 延迟5秒后启动，确保数据库连接和其他服务已准备就绪
-    setTimeout(async () => {
-      await this.initializeSystem();
-    }, 5000);
+  /**
+   * 系统启动时执行
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.initializeSystem();
   }
 
   /**
@@ -34,9 +34,10 @@ export class StartupService implements OnApplicationBootstrap {
       // this.displayWelcomeBanner();
       
       await this.ensureDefaultConfigs();
-      await this.fetchInitialKlineData(); // 新增：获取初始K线数据
-      await this.startAutoSubscription();
-      await this.performInitialAnalysis(); // 新增：执行初始分析
+      await this.fetchInitialKlineData(); // 获取初始K线数据
+      // 注释掉WebSocket自动订阅功能
+      // await this.startAutoSubscription();
+      await this.performInitialAnalysis(); // 执行初始分析
       
       // this.displaySuccessBanner();
     } catch (error) {
