@@ -165,3 +165,26 @@ model StrategyBacktest {
   @@index([strategyId, symbol, interval])
   @@map("strategy_backtests")
 }
+
+// 通知记录表
+model NotificationRecord {
+  id         Int      @id @default(autoincrement())
+  title      String   @db.VarChar(200)
+  message    String   @db.Text
+  type       String   @db.VarChar(20) // info, success, warning, error
+  symbol     String?  @db.VarChar(20)
+  interval   String?  @db.VarChar(10)
+  signal     String?  @db.VarChar(20)
+  confidence Decimal? @db.Decimal(5, 2)
+  summary    String?  @db.Text
+  patterns   String?  @db.Text
+  supportResistance String? @db.Text @map("support_resistance")
+  data       String?  @db.Text // JSON格式存储额外数据
+  timestamp  DateTime @map("timestamp")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([type, createdAt])
+  @@index([symbol, interval, createdAt])
+  @@index([timestamp])
+  @@map("notification_records")
+}

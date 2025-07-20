@@ -1,7 +1,11 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { CoinConfigService } from '../coin-config/coin-config.service';
 import { WebSocketService } from './websocket/websocket.service';
+import { DataService } from './data.service';
+import { AnalysisService } from '../analysis/analysis.service';
+import { NotificationService } from '../notification/notification.service';
 import { IntervalType } from 'src/shared/enums';
+import { ComprehensiveAnalysis } from 'src/shared/interfaces/analysis.interface';
 
 @Injectable()
 export class StartupService implements OnApplicationBootstrap {
@@ -10,6 +14,9 @@ export class StartupService implements OnApplicationBootstrap {
   constructor(
     private readonly coinConfigService: CoinConfigService,
     private readonly webSocketService: WebSocketService,
+    private readonly dataService: DataService,
+    private readonly analysisService: AnalysisService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   async onApplicationBootstrap() {
@@ -24,12 +31,14 @@ export class StartupService implements OnApplicationBootstrap {
    */
   private async initializeSystem(): Promise<void> {
     try {
-      this.displayWelcomeBanner();
+      // this.displayWelcomeBanner();
       
       await this.ensureDefaultConfigs();
+      await this.fetchInitialKlineData(); // 新增：获取初始K线数据
       await this.startAutoSubscription();
+      await this.performInitialAnalysis(); // 新增：执行初始分析
       
-      this.displaySuccessBanner();
+      // this.displaySuccessBanner();
     } catch (error) {
       this.logger.error('❌ 系统初始化失败:', error);
     }
@@ -129,21 +138,219 @@ export class StartupService implements OnApplicationBootstrap {
   }
 
   /**
+   * 获取初始K线数据
+   */
+  private async fetchInitialKlineData(): Promise<void> {
+    this.logger.log('📊 获取初始K线数据...');
+    
+    const activeConfigs = await this.coinConfigService.findActiveConfigs();
+    
+    if (activeConfigs.length === 0) {
+      this.logger.warn('⚠️  没有活跃配置，跳过数据获取');
+      return;
+    }
+
+    // 定义需要获取的时间周期
+    const intervals = [
+      IntervalType.FIFTEEN_MINUTES,
+      IntervalType.ONE_HOUR,
+      IntervalType.FOUR_HOURS,
+      IntervalType.ONE_DAY
+    ];
+
+    // 获取每个时间周期的最大K线数量（根据Binance API限制）
+    const maxLimits = {
+      [IntervalType.FIFTEEN_MINUTES]: 1000, // 15分钟：约10.4天
+      [IntervalType.ONE_HOUR]: 1000,        // 1小时：约41.7天
+      [IntervalType.FOUR_HOURS]: 1000,      // 4小时：约166.7天
+      [IntervalType.ONE_DAY]: 1000          // 1日：约2.7年
+    };
+
+    const totalSymbols = activeConfigs.length;
+    let completedSymbols = 0;
+    let totalKlineCount = 0;
+
+    for (const config of activeConfigs) {
+      const symbol = config.symbol;
+      
+      this.logger.log(`🔄 正在获取 ${symbol} 的多周期数据... (${completedSymbols + 1}/${totalSymbols})`);
+      
+      // 并行获取所有时间周期的数据，但添加错误处理
+      const fetchPromises = intervals.map(async (interval) => {
+        const maxRetries = 3;
+        let attempt = 0;
+        
+        while (attempt < maxRetries) {
+          try {
+            const limit = maxLimits[interval];
+            const data = await this.dataService.getKlineData({
+              symbol,
+              interval,
+              limit
+            });
+            
+            // this.logger.log(`   ✅ ${symbol} ${interval}: ${data.length}条K线数据`);
+            return { symbol, interval, count: data.length, success: true };
+          } catch (error) {
+            attempt++;
+            const isLastAttempt = attempt === maxRetries;
+            
+            if (isLastAttempt) {
+              this.logger.error(`   ❌ ${symbol} ${interval} 获取失败 (${maxRetries}次重试后):`, error.message);
+              return { symbol, interval, count: 0, error: error.message, success: false };
+            } else {
+              this.logger.warn(`   ⚠️  ${symbol} ${interval} 获取失败，第${attempt}次重试中...`);
+              // 指数退避重试
+              await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+            }
+          }
+        }
+      });
+
+      try {
+        const results = await Promise.all(fetchPromises);
+        const successfulResults = results.filter(result => result.success);
+        const failedResults = results.filter(result => !result.success);
+        
+        const symbolKlineCount = successfulResults.reduce((sum, result) => sum + result.count, 0);
+        totalKlineCount += symbolKlineCount;
+        
+        if (failedResults.length === 0) {
+          // this.logger.log(`🎯 ${symbol} 数据获取完成，总计 ${symbolKlineCount} 条K线`);
+        } else {
+          // this.logger.warn(`⚠️  ${symbol} 部分数据获取失败 (${failedResults.length}/${intervals.length}个周期失败)`);
+          
+          // 发送错误通知
+          await this.notificationService.sendNotification({
+            title: `⚠️ ${symbol} 数据获取部分失败`,
+            message: `${failedResults.length}个时间周期的数据获取失败`,
+            type: 'warning',
+            timestamp: new Date().toLocaleString('zh-CN'),
+            data: { symbol, failedIntervals: failedResults.map(r => r.interval) }
+          });
+        }
+      } catch (error) {
+        this.logger.error(`❌ ${symbol} 数据获取整体失败:`, error);
+        
+        // 发送错误通知
+        await this.notificationService.sendNotification({
+          title: `❌ ${symbol} 数据获取失败`,
+          message: `无法获取任何时间周期的数据: ${error.message}`,
+          type: 'error',
+          timestamp: new Date().toLocaleString('zh-CN'),
+          data: { symbol, error: error.message }
+        });
+      }
+      
+      completedSymbols++;
+    }
+    
+    this.logger.log(`📈 初始K线数据获取完成，总计 ${totalKlineCount} 条K线数据，覆盖 ${completedSymbols} 个币种`);
+  }
+
+  /**
+   * 执行初始分析
+   */
+  private async performInitialAnalysis(): Promise<void> {
+    this.logger.log('🔍 执行初始图像结构分析...');
+    
+    const activeConfigs = await this.coinConfigService.findActiveConfigs();
+    
+    if (activeConfigs.length === 0) {
+      this.logger.warn('⚠️  没有活跃配置，跳过分析');
+      return;
+    }
+
+    // 主要分析周期
+    const analysisIntervals = [
+      IntervalType.ONE_HOUR,
+      IntervalType.FOUR_HOURS,
+      IntervalType.ONE_DAY
+    ];
+
+    let totalAnalysisCount = 0;
+    let successfulAnalysisCount = 0;
+
+    for (const config of activeConfigs) {
+      const symbol = config.symbol;
+      
+      // this.logger.log(`🎯 分析 ${symbol} 的图像结构...`);
+      
+      for (const interval of analysisIntervals) {
+        totalAnalysisCount++;
+        
+        try {
+          const analysis = await this.analysisService.performComprehensiveAnalysis(
+            symbol,
+            interval,
+            100 // 分析最近100根K线
+          );
+
+          // 发送通知
+          await this.sendAnalysisNotification(symbol, interval, analysis);
+          successfulAnalysisCount++;
+          
+          // 在分析间添加小延迟，避免过度负载
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+        } catch (error) {
+          this.logger.error(`❌ ${symbol} ${interval} 分析失败:`, error.message);
+          
+          // 发送分析失败通知
+          await this.notificationService.sendNotification({
+            title: `❌ ${symbol}(${interval}) 分析失败`,
+            message: `图像结构分析出现错误: ${error.message}`,
+            type: 'error',
+            timestamp: new Date().toLocaleString('zh-CN'),
+            data: { symbol, interval, error: error.message }
+          });
+        }
+      }
+    }
+    
+    const successRate = ((successfulAnalysisCount / totalAnalysisCount) * 100).toFixed(1);
+    // this.logger.log(`✅ 初始分析完成: ${successfulAnalysisCount}/${totalAnalysisCount} 成功 (${successRate}%)`);
+    
+    // 发送分析完成总结通知
+    await this.notificationService.sendNotification({
+      title: '📊 启动分析完成',
+      message: `初始图像结构分析已完成，成功率: ${successRate}%`,
+      type: successfulAnalysisCount === totalAnalysisCount ? 'success' : 'warning',
+      timestamp: new Date().toLocaleString('zh-CN'),
+      data: {
+        total: totalAnalysisCount,
+        successful: successfulAnalysisCount,
+        successRate: parseFloat(successRate)
+      }
+    });
+  }
+
+  /**
+   * 发送分析通知
+   */
+  private async sendAnalysisNotification(
+    symbol: string, 
+    interval: IntervalType, 
+    analysis: ComprehensiveAnalysis
+  ): Promise<void> {
+    try {
+      await this.notificationService.sendAnalysisNotification(symbol, interval, analysis);
+    } catch (error) {
+      this.logger.error('发送通知失败:', error);
+    }
+  }
+
+  /**
    * 显示成功横幅
    */
   private displaySuccessBanner(): void {
     const banner = `
 ╔══════════════════════════════════════════════════════════╗
-║             ✅ 系统启动完成！                             ║
+║             ✅ 系统启动完成！                              ║
 ║                                                          ║
-║  🔄 实时数据监控已启动                                   ║
-║  📊 数据将显示在控制台日志中                             ║
-║  💾 完结的K线会自动保存到数据库                          ║
-║                                                          ║
-║  💡 管理命令:                                            ║
-║     ./scripts/manage.sh ws-status    - 查看连接状态      ║
-║     ./scripts/manage.sh test         - 测试API          ║
-║     ./scripts/manage.sh add SYMBOL INTERVAL - 添加配置   ║
+║  🔄 实时数据监控已启动                                      ║
+║  📊 数据将显示在控制台日志中                                 ║
+║  💾 完结的K线会自动保存到数据库                              ║
 ║                                                          ║
 ║  📈 实时价格更新即将开始...                              ║
 ╚══════════════════════════════════════════════════════════╝

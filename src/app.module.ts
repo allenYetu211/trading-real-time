@@ -7,6 +7,7 @@ import { CoinConfigModule } from './modules/coin-config/coin-config.module';
 import { DataModule } from './modules/data/data.module';
 import { AnalysisModule } from './modules/analysis/analysis.module';
 import { StrategyModule } from './modules/strategy/strategy.module';
+import { NotificationModule } from './modules/notification/notification.module';
 import { appConfig, databaseConfig, redisConfig, binanceConfig } from './config';
 
 @Module({
@@ -20,6 +21,7 @@ import { appConfig, databaseConfig, redisConfig, binanceConfig } from './config'
     DataModule,
     AnalysisModule,
     StrategyModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

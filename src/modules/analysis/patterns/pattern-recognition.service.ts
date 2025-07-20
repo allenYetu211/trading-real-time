@@ -281,7 +281,7 @@ export class PatternRecognitionService {
       // 按置信度排序
       allPatterns.sort((a, b) => b.confidence - a.confidence);
       
-      this.logger.debug(`识别到 ${allPatterns.length} 个形态`);
+      // this.logger.debug(`识别到 ${allPatterns.length} 个形态`);
       
     } catch (error) {
       this.logger.error('形态识别失败:', error);

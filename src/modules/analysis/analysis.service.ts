@@ -2,9 +2,25 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DataService } from '../data/data.service';
 import { IndicatorService, IndicatorResult } from './indicators/indicator.service';
 import { PatternRecognitionService, PatternResult, SupportResistanceLevel } from './patterns/pattern-recognition.service';
-import { KlineData, AnalysisResult } from 'src/shared/interfaces';
+import { KlineData } from 'src/shared/interfaces';
 import { IntervalType, PatternType, SignalType } from 'src/shared/enums';
 import { PrismaService } from 'src/prisma/prisma.service';
+
+export interface AnalysisResult {
+  id?: number;
+  symbol: string;
+  interval: string;
+  timestamp: number;
+  trendScore: number;
+  momentumScore: number;
+  volatilityScore: number;
+  signal: SignalType;
+  confidence: number;
+  patterns: any[];
+  supportResistance: any[];
+  summary: string;
+  createdAt?: Date;
+}
 
 export interface ComprehensiveAnalysis {
   symbol: string;
@@ -56,7 +72,7 @@ export class AnalysisService {
     limit: number = 100
   ): Promise<ComprehensiveAnalysis> {
     try {
-      this.logger.log(`开始分析: ${symbol} ${interval}`);
+      // this.logger.log(`开始分析: ${symbol} ${interval}`);
       
       // 获取K线数据
       const klineData = await this.dataService.getKlineData({
@@ -97,7 +113,7 @@ export class AnalysisService {
       // 保存分析结果到数据库
       await this.saveAnalysisResult(analysis);
       
-      this.logger.log(`分析完成: ${symbol} ${interval}, 信号: ${score.signal}, 置信度: ${score.confidence}%`);
+      // this.logger.log(`分析完成: ${symbol} ${interval}, 信号: ${score.signal}, 置信度: ${score.confidence}%`);
       
       return analysis;
       
@@ -410,7 +426,7 @@ export class AnalysisService {
         },
       });
       
-      this.logger.debug(`分析结果已保存: ${analysis.symbol} ${analysis.interval}`);
+      // this.logger.debug(`分析结果已保存: ${analysis.symbol} ${analysis.interval}`);
     } catch (error) {
       this.logger.error('保存分析结果失败:', error);
     }

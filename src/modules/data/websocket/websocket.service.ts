@@ -1,10 +1,12 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as WebSocket from 'ws';
 import { KlineData } from 'src/shared/interfaces';
 import { IntervalType } from 'src/shared/enums';
 import { DataStorageService } from '../data-storage.service';
 import { CacheService } from '../cache.service';
+import { AnalysisService } from '../../analysis/analysis.service';
+import { NotificationService } from '../../notification/notification.service';
 
 interface BinanceKlineEvent {
   e: string; // 事件类型
@@ -44,6 +46,9 @@ export class WebSocketService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly dataStorageService: DataStorageService,
     private readonly cacheService: CacheService,
+    @Inject(forwardRef(() => AnalysisService))
+    private readonly analysisService: AnalysisService,
+    private readonly notificationService: NotificationService,
   ) {
     const binanceConfig = this.configService.get('binance');
     this.baseUrl = binanceConfig.wsBaseUrl;
@@ -203,7 +208,10 @@ export class WebSocketService implements OnModuleInit, OnModuleDestroy {
       // 只有K线完结时才保存到数据库
       if (event.k.x) {
         await this.dataStorageService.saveKline(klineData);
-        this.logger.log(`💾 [完结] ${klineData.symbol}(${klineData.interval}) $${klineData.closePrice} 📊 交易次数:${klineData.numberOfTrades}`);
+        // this.logger.log(`💾 [完结] ${klineData.symbol}(${klineData.interval}) $${klineData.closePrice} 📊 交易次数:${klineData.numberOfTrades}`);
+        
+        // K线完结时触发实时分析
+        this.triggerRealtimeAnalysis(klineData.symbol, klineData.interval as IntervalType);
       }
 
       // 实时更新缓存（无论是否完结）
@@ -211,6 +219,55 @@ export class WebSocketService implements OnModuleInit, OnModuleDestroy {
       
     } catch (error) {
       this.logger.error('处理K线事件失败:', error);
+    }
+  }
+
+  /**
+   * 触发实时分析
+   */
+  private async triggerRealtimeAnalysis(symbol: string, interval: IntervalType): Promise<void> {
+    try {
+      // 只对主要时间周期进行实时分析，避免过于频繁
+      const analysisIntervals = [
+        IntervalType.FIFTEEN_MINUTES,
+        IntervalType.ONE_HOUR,
+        IntervalType.FOUR_HOURS,
+      ];
+
+      if (!analysisIntervals.includes(interval)) {
+        return; // 跳过不需要分析的时间周期
+      }
+
+      this.logger.log(`🔍 触发实时分析: ${symbol}(${interval})`);
+
+      // 异步执行分析，不阻塞主流程
+      setImmediate(async () => {
+        try {
+          const analysis = await this.analysisService.performComprehensiveAnalysis(
+            symbol,
+            interval,
+            100 // 分析最近100根K线
+          );
+
+          // 发送分析通知
+          await this.notificationService.sendAnalysisNotification(symbol, interval, analysis);
+          
+          this.logger.log(`✅ 实时分析完成: ${symbol}(${interval}) 信号: ${analysis.score.signal} 置信度: ${analysis.score.confidence}%`);
+        } catch (error) {
+          this.logger.error(`❌ 实时分析失败: ${symbol}(${interval})`, error.message);
+          
+          // 发送分析失败通知
+          await this.notificationService.sendNotification({
+            title: `❌ ${symbol}(${interval}) 实时分析失败`,
+            message: `图像结构分析出现错误: ${error.message}`,
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            data: { symbol, interval, error: error.message, realtime: true }
+          });
+        }
+      });
+    } catch (error) {
+      this.logger.error('触发实时分析失败:', error);
     }
   }
 
@@ -230,7 +287,7 @@ export class WebSocketService implements OnModuleInit, OnModuleDestroy {
     if (isFinal) {
       this.logger.log(`🎯 ${message}`);
     } else {
-      this.logger.debug(`📊 ${message}`);
+      // this.logger.debug(`📊 ${message}`);
     }
   }
 

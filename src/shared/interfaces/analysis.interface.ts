@@ -1,67 +1,59 @@
-import { PatternType, SignalType } from '../enums';
+import { IntervalType, SignalType } from '../enums';
 
-export interface AnalysisResult {
-  id?: number;
-  symbol: string;
-  interval: string;
+export interface IndicatorResult {
   timestamp: number;
-  trendScore: number;
-  momentumScore: number;
-  volatilityScore: number;
+  value: number | object;
+}
+
+export interface PatternResult {
+  type: string;
   signal: SignalType;
   confidence: number;
-  patterns: any[];
-  supportResistance: any[];
-  summary: string;
-  createdAt?: Date;
-}
-
-// 保留向后兼容性的接口
-export interface LegacyAnalysisResult {
-  symbol: string;
-  interval: string;
-  detectedPattern: PatternType;
-  keyLevels: {
-    upper?: number;
-    lower?: number;
+  startTime: number;
+  endTime: number;
+  description: string;
+  keyLevels?: {
     support?: number;
     resistance?: number;
-  };
-  confidence: number;
-  timestamp: number;
-  note?: string;
-}
-
-export interface TechnicalIndicator {
-  ema12?: number;
-  ema26?: number;
-  sma20?: number;
-  macd?: {
-    macd: number;
-    signal: number;
-    histogram: number;
-  };
-  rsi?: number;
-  bollingerBands?: {
-    upper: number;
-    middle: number;
-    lower: number;
+    breakoutLevel?: number;
   };
 }
 
-export interface BoxPattern {
-  upperLevel: number;
-  lowerLevel: number;
-  touchPoints: number;
-  duration: number;
-  confidence: number;
-  isValid: boolean;
-}
-
-export interface BreakoutPattern {
-  direction: 'UP' | 'DOWN';
-  breakoutPrice: number;
-  volumeConfirmation: boolean;
+export interface SupportResistanceLevel {
+  level: number;
   strength: number;
-  priceTarget?: number;
+  type: 'support' | 'resistance';
+  touchCount: number;
+  firstTouch: number;
+  lastTouch: number;
+}
+
+export interface ComprehensiveAnalysis {
+  symbol: string;
+  interval: IntervalType;
+  timestamp: number;
+  klineCount: number;
+  
+  // 技术指标
+  indicators: {
+    [key: string]: IndicatorResult[];
+  };
+  
+  // 图形形态
+  patterns: PatternResult[];
+  
+  // 支撑阻力位
+  supportResistance: SupportResistanceLevel[];
+  
+  // 综合评分
+  score: {
+    trend: number; // 趋势强度 -100 到 100
+    momentum: number; // 动量 -100 到 100
+    volatility: number; // 波动率 0 到 100
+    signal: SignalType; // 综合信号
+    confidence: number; // 置信度 0 到 100
+  };
+  
+  // 分析总结
+  summary: string;
 } 

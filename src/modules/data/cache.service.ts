@@ -46,7 +46,7 @@ export class CacheService {
     try {
       const key = this.generateKey('kline', symbol, interval, 'list');
       await this.redis.setex(key, this.cacheTTL, JSON.stringify(data));
-      this.logger.debug(`缓存K线数据: ${key}, 数量: ${data.length}`);
+      // this.logger.debug(`缓存K线数据: ${key}, 数量: ${data.length}`);
     } catch (error) {
       this.logger.error('缓存K线数据失败:', error);
     }
@@ -61,7 +61,7 @@ export class CacheService {
       const cached = await this.redis.get(key);
       
       if (cached) {
-        this.logger.debug(`命中K线数据缓存: ${key}`);
+        // this.logger.debug(`命中K线数据缓存: ${key}`);
         return JSON.parse(cached);
       }
       
@@ -79,7 +79,7 @@ export class CacheService {
     try {
       const key = this.generateKey('price', symbol, 'latest' as IntervalType);
       await this.redis.setex(key, this.cacheTTL, price.toString());
-      this.logger.debug(`缓存最新价格: ${symbol} = ${price}`);
+      // this.logger.debug(`缓存最新价格: ${symbol} = ${price}`);
     } catch (error) {
       this.logger.error('缓存价格失败:', error);
     }

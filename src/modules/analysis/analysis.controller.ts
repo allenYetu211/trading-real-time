@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
 import { AnalysisService, ComprehensiveAnalysis } from './analysis.service';
+import { ScheduledAnalysisService } from './services/scheduled-analysis.service';
 import { IndicatorService } from './indicators/indicator.service';
 import { PatternRecognitionService } from './patterns/pattern-recognition.service';
 import { IntervalType } from 'src/shared/enums';
@@ -18,6 +19,7 @@ import { IntervalType } from 'src/shared/enums';
 export class AnalysisController {
   constructor(
     private readonly analysisService: AnalysisService,
+    private readonly scheduledAnalysisService: ScheduledAnalysisService,
     private readonly indicatorService: IndicatorService,
     private readonly patternService: PatternRecognitionService,
   ) {}
@@ -335,6 +337,30 @@ export class AnalysisController {
     } catch (error) {
       throw new HttpException(
         `获取仪表板数据失败: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  @Post('scheduled/trigger')
+  @ApiOperation({ summary: '手动触发定时分析' })
+  @ApiResponse({ 
+    status: 200, 
+    description: '成功触发定时分析'
+  })
+  async triggerScheduledAnalysis(): Promise<{ message: string }> {
+    try {
+      // 异步执行，不阻塞响应
+      setImmediate(() => {
+        this.scheduledAnalysisService.triggerManualAnalysis();
+      });
+      
+      return {
+        message: '定时分析已触发，请稍后查看 Telegram 通知结果'
+      };
+    } catch (error) {
+      throw new HttpException(
+        `触发定时分析失败: ${error.message}`,
         HttpStatus.INTERNAL_SERVER_ERROR
       );
     }

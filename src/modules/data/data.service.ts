@@ -26,7 +26,7 @@ export class DataService {
     if (!startTime && !endTime) {
       const cachedData = await this.cacheService.getCachedKlineData(symbol, interval);
       if (cachedData && cachedData.length >= limit) {
-        this.logger.debug(`从缓存返回K线数据: ${symbol} ${interval}`);
+        // this.logger.debug(`从缓存返回K线数据: ${symbol} ${interval}`);
         return cachedData.slice(0, limit);
       }
     }
@@ -41,7 +41,7 @@ export class DataService {
     );
 
     if (dbData.length >= limit) {
-      this.logger.debug(`从数据库返回K线数据: ${symbol} ${interval}, 数量: ${dbData.length}`);
+      // this.logger.debug(`从数据库返回K线数据: ${symbol} ${interval}, 数量: ${dbData.length}`);
       
       // 缓存数据库查询结果
       if (!startTime && !endTime) {
@@ -52,7 +52,7 @@ export class DataService {
     }
 
     // 3. 从Binance API获取
-    this.logger.debug(`从API获取K线数据: ${symbol} ${interval}`);
+    // this.logger.debug(`从API获取K线数据: ${symbol} ${interval}`);
     const apiData = await this.binanceApiService.getKlineData(
       symbol, 
       interval, 
