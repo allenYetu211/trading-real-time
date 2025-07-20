@@ -31,17 +31,27 @@ export class StartupService implements OnApplicationBootstrap {
    */
   private async initializeSystem(): Promise<void> {
     try {
-      // this.displayWelcomeBanner();
+      this.logger.log('🚀 实时Token交易系统正在启动...');
       
-      await this.ensureDefaultConfigs();
-      await this.fetchInitialKlineData(); // 获取初始K线数据
-      // 注释掉WebSocket自动订阅功能
-      // await this.startAutoSubscription();
-      await this.performInitialAnalysis(); // 执行初始分析
+      // 发送系统启动通知
+      await this.sendStartupNotification();
       
-      // this.displaySuccessBanner();
+      this.logger.log('✅ 系统启动完成，等待后续操作指令');
     } catch (error) {
       this.logger.error('❌ 系统初始化失败:', error);
+      
+      // 发送启动失败通知
+      try {
+        await this.notificationService.sendNotification({
+          title: '❌ 系统启动失败',
+          message: `系统启动过程中出现错误: ${error.message}`,
+          type: 'error',
+          timestamp: new Date().toLocaleString('zh-CN'),
+          data: { error: error.message }
+        });
+      } catch (notificationError) {
+        this.logger.error('发送启动失败通知时出错:', notificationError);
+      }
     }
   }
 
@@ -328,24 +338,23 @@ export class StartupService implements OnApplicationBootstrap {
   }
 
   /**
-   * 显示成功横幅
+   * 发送系统启动通知
    */
-  private displaySuccessBanner(): void {
-    const banner = `
-╔══════════════════════════════════════════════════════════╗
-║             ✅ 系统启动完成！                              ║
-║                                                          ║
-║  🔄 实时数据监控已启动                                      ║
-║  📊 数据将显示在控制台日志中                                 ║
-║  💾 完结的K线会自动保存到数据库                              ║
-║                                                          ║
-║  📈 实时价格更新即将开始...                              ║
-╚══════════════════════════════════════════════════════════╝
-    `;
-    
-    // 延迟3秒显示成功消息，让WebSocket有时间连接
-    setTimeout(() => {
-      this.logger.log(banner);
-    }, 3000);
+  private async sendStartupNotification(): Promise<void> {
+    try {
+      await this.notificationService.sendNotification({
+        title: '🚀 实时Token交易系统启动',
+        message: '系统已成功启动，等待后续操作指令。可通过API接口进行数据获取、分析等操作。',
+        type: 'info',
+        timestamp: new Date().toLocaleString('zh-CN'),
+        data: {
+          startupTime: Date.now(),
+          version: '1.0.0',
+          status: 'ready'
+        }
+      });
+    } catch (error) {
+      this.logger.warn('发送启动通知失败:', error.message);
+    }
   }
 } 
