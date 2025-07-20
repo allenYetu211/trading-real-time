@@ -178,33 +178,19 @@ export class StartupService implements OnApplicationBootstrap {
       
       // 并行获取所有时间周期的数据，但添加错误处理
       const fetchPromises = intervals.map(async (interval) => {
-        const maxRetries = 3;
-        let attempt = 0;
-        
-        while (attempt < maxRetries) {
-          try {
-            const limit = maxLimits[interval];
-            const data = await this.dataService.getKlineData({
-              symbol,
-              interval,
-              limit
-            });
-            
-            // this.logger.log(`   ✅ ${symbol} ${interval}: ${data.length}条K线数据`);
-            return { symbol, interval, count: data.length, success: true };
-          } catch (error) {
-            attempt++;
-            const isLastAttempt = attempt === maxRetries;
-            
-            if (isLastAttempt) {
-              this.logger.error(`   ❌ ${symbol} ${interval} 获取失败 (${maxRetries}次重试后):`, error.message);
-              return { symbol, interval, count: 0, error: error.message, success: false };
-            } else {
-              this.logger.warn(`   ⚠️  ${symbol} ${interval} 获取失败，第${attempt}次重试中...`);
-              // 指数退避重试
-              await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
-            }
-          }
+        try {
+          const limit = maxLimits[interval];
+          const data = await this.dataService.getKlineData({
+            symbol,
+            interval,
+            limit
+          });
+          
+          // this.logger.log(`   ✅ ${symbol} ${interval}: ${data.length}条K线数据`);
+          return { symbol, interval, count: data.length, success: true };
+        } catch (error) {
+          this.logger.error(`   ❌ ${symbol} ${interval} 获取失败，不进行重试:`, error.message);
+          return { symbol, interval, count: 0, error: error.message, success: false };
         }
       });
 

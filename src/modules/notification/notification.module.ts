@@ -12,6 +12,7 @@ import { telegramConfig } from 'src/config';
     ConfigModule.forFeature(telegramConfig),
     forwardRef(() => import('../coin-config/coin-config.module').then(m => m.CoinConfigModule)),
     forwardRef(() => import('../analysis/analysis.module').then(m => m.AnalysisModule)),
+    forwardRef(() => import('../data/data.module').then(m => m.DataModule)),
   ],
   controllers: [NotificationController],
   providers: [NotificationService, TelegramService],

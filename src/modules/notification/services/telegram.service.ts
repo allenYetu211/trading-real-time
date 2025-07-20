@@ -4,6 +4,7 @@ import * as TelegramBot from 'node-telegram-bot-api';
 import { NotificationData, AnalysisNotification } from '../notification.service';
 import { CoinConfigService } from '../../coin-config/coin-config.service';
 import { AnalysisService } from '../../analysis/analysis.service';
+import { DataService } from '../../data/data.service';
 import { IntervalType } from 'src/shared/enums';
 
 export interface TelegramConfig {
@@ -15,12 +16,23 @@ export interface TelegramConfig {
   disableNotification: boolean;
 }
 
+// 用户状态管理接口
+interface UserState {
+  command: string;
+  data?: any;
+  timestamp: number;
+}
+
 @Injectable()
 export class TelegramService {
   private readonly logger = new Logger(TelegramService.name);
   private bot: TelegramBot | null = null;
   private config: TelegramConfig;
   private commandsInitialized = false;
+  
+  // 用户状态管理 - 存储每个用户的当前状态
+  private userStates = new Map<string, UserState>();
+  private readonly STATE_TIMEOUT = 5 * 60 * 1000; // 5分钟超时
 
   constructor(
     private readonly configService: ConfigService,
@@ -28,9 +40,58 @@ export class TelegramService {
     private readonly coinConfigService: CoinConfigService,
     @Inject(forwardRef(() => AnalysisService))
     private readonly analysisService: AnalysisService,
+    @Inject(forwardRef(() => DataService))
+    private readonly dataService: DataService,
   ) {
     this.config = this.configService.get<TelegramConfig>('telegram')!;
     this.initializeBot();
+    // 定期清理过期状态
+    this.startStateCleanup();
+  }
+
+  /**
+   * 启动状态清理定时器
+   */
+  private startStateCleanup(): void {
+    setInterval(() => {
+      const now = Date.now();
+      for (const [userId, state] of this.userStates.entries()) {
+        if (now - state.timestamp > this.STATE_TIMEOUT) {
+          this.userStates.delete(userId);
+          this.logger.debug(`清理过期用户状态: ${userId}`);
+        }
+      }
+    }, 60 * 1000); // 每分钟检查一次
+  }
+
+  /**
+   * 设置用户状态
+   */
+  private setUserState(userId: string, command: string, data?: any): void {
+    this.userStates.set(userId, {
+      command,
+      data,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * 获取用户状态
+   */
+  private getUserState(userId: string): UserState | null {
+    const state = this.userStates.get(userId);
+    if (state && Date.now() - state.timestamp <= this.STATE_TIMEOUT) {
+      return state;
+    }
+    this.userStates.delete(userId);
+    return null;
+  }
+
+  /**
+   * 清除用户状态
+   */
+  private clearUserState(userId: string): void {
+    this.userStates.delete(userId);
   }
 
   /**
@@ -139,7 +200,7 @@ export class TelegramService {
     }
 
     try {
-      const message = this.formatMultiTimeframeAnalysisMessage(symbol, analysisData, summary);
+      const message = await this.formatMultiTimeframeAnalysisMessage(symbol, analysisData, summary);
       
       await this.bot!.sendMessage(this.config.chatId, message, {
         parse_mode: this.config.parseMode,
@@ -241,7 +302,7 @@ ${signalEmoji[data.signal]} <b>${this.escapeHtml(data.symbol)}(${this.escapeHtml
   /**
    * 格式化多时间周期分析通知消息
    */
-  private formatMultiTimeframeAnalysisMessage(
+  private async formatMultiTimeframeAnalysisMessage(
     symbol: string,
     analysisData: Array<{
       interval: string;
@@ -258,7 +319,7 @@ ${signalEmoji[data.signal]} <b>${this.escapeHtml(data.symbol)}(${this.escapeHtml
       consistentSignals: string[];
       timestamp: string;
     }
-  ): string {
+  ): Promise<string> {
     const signalEmoji = {
       'BUY': '🚀',
       'SELL': '📉',
@@ -281,11 +342,14 @@ ${signalEmoji[data.signal]} <b>${this.escapeHtml(data.symbol)}(${this.escapeHtml
     const avgTrend = analysisData.reduce((sum, item) => sum + item.trend, 0) / analysisData.length;
     const avgMomentum = analysisData.reduce((sum, item) => sum + item.momentum, 0) / analysisData.length;
 
+    // 获取当前价格
+    const currentPrice = await this.getLatestPrice(symbol);
+
     let message = `
 ${typeEmoji[summary.avgConfidence >= 80 ? 'success' : summary.avgConfidence >= 60 ? 'warning' : 'info']} <b>多时间周期综合分析</b>
 
 ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
-💰 当前价格: <b>$${this.formatPrice(this.getLatestPrice(analysisData))}</b>
+💰 当前价格: <b>$${this.formatPrice(currentPrice)}</b>
 📊 综合信号: <b>${dominantSignal}</b>
 🎯 平均置信度: <b>${summary.avgConfidence}%</b>
 📈 趋势强度: <b>${this.formatPercentage(avgTrend)}</b>
@@ -299,7 +363,7 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
     }
 
     // 添加关键价位分析
-    const keyLevels = this.analyzeKeyLevels(analysisData);
+    const keyLevels = this.analyzeKeyLevels(analysisData, currentPrice);
     if (keyLevels) {
       message += `\n\n📍 <b>关键价位分析</b>`;
       message += `\n🔴 压力位: <b>$${keyLevels.resistance}</b>`;
@@ -374,28 +438,27 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
   /**
    * 获取最新价格
    */
-  private getLatestPrice(analysisData: any[]): number {
-    // 从5分钟周期获取最新价格，如果没有则使用其他周期
-    const fiveMinData = analysisData.find(item => item.interval === '5m');
-    if (fiveMinData && fiveMinData.keyLevels && fiveMinData.keyLevels.length > 0) {
-      return fiveMinData.keyLevels[0].price || 0;
+  private async getLatestPrice(symbol: string): Promise<number> {
+    try {
+      return await this.dataService.getLatestPrice(symbol);
+    } catch (error) {
+      this.logger.error(`获取 ${symbol} 最新价格失败:`, error);
+      return 0;
     }
-    return 0;
   }
 
   /**
    * 分析关键价位
    */
-  private analyzeKeyLevels(analysisData: any[]): any {
+  private analyzeKeyLevels(analysisData: any[], currentPrice: number): any {
     const allLevels = analysisData.flatMap(item => item.keyLevels || []);
     if (allLevels.length === 0) return null;
 
     // 简化处理，实际应该根据具体的keyLevels结构来分析
-    const prices = allLevels.map(level => level.price || 0).filter(p => p > 0);
+    const prices = allLevels.map(level => level.level || 0).filter(p => p > 0);
     if (prices.length === 0) return null;
 
     const sortedPrices = prices.sort((a, b) => b - a);
-    const currentPrice = this.getLatestPrice(analysisData);
     
     return {
       resistance: this.formatPrice(sortedPrices[0]),
@@ -650,18 +713,31 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
       try {
         const chatId = msg.chat.id;
         const text = msg.text;
+        const userId = chatId.toString();
 
         // 只处理来自配置的 chat ID 的消息
-        if (chatId.toString() !== this.config.chatId) {
+        if (userId !== this.config.chatId) {
           this.logger.warn(`收到来自未授权聊天的消息: ${chatId}`);
           return;
         }
 
-        if (!text || !text.startsWith('/')) {
+        if (!text) {
           return;
         }
 
-        await this.handleCommand(chatId, text, msg);
+        // 检查用户是否处于等待输入状态
+        const userState = this.getUserState(userId);
+        
+        if (userState && !text.startsWith('/')) {
+          // 处理用户在等待状态下的输入
+          await this.handleUserInput(chatId, text, userState);
+          return;
+        }
+
+        // 处理命令
+        if (text.startsWith('/')) {
+          await this.handleCommand(chatId, text, msg);
+        }
       } catch (error) {
         this.logger.error('处理 Telegram 消息时出错:', error);
       }
@@ -733,6 +809,50 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
   }
 
   /**
+   * 处理用户在等待状态下的输入
+   */
+  private async handleUserInput(chatId: number, text: string, userState: UserState): Promise<void> {
+    const userId = chatId.toString();
+    
+    try {
+      switch (userState.command) {
+        case 'waiting_add_symbol':
+          await this.processAddSymbolInput(chatId, text.trim().toUpperCase());
+          break;
+          
+        default:
+          await this.sendCommandMessage(chatId, '❌ 未知的等待状态，请重新开始操作');
+          break;
+      }
+    } catch (error) {
+      this.logger.error('处理用户输入失败:', error);
+      await this.sendCommandMessage(chatId, '❌ 处理输入时发生错误，请重试');
+    } finally {
+      // 处理完成后清除用户状态
+      this.clearUserState(userId);
+    }
+  }
+
+  /**
+   * 处理添加交易对的输入
+   */
+  private async processAddSymbolInput(chatId: number, symbol: string): Promise<void> {
+    if (!symbol || symbol.length < 3) {
+      await this.sendCommandMessage(chatId, '❌ 请输入有效的交易对名称（如：BTCUSDT）');
+      return;
+    }
+
+    // 验证交易对格式
+    if (!/^[A-Z0-9]+$/.test(symbol)) {
+      await this.sendCommandMessage(chatId, '❌ 交易对名称只能包含大写字母和数字');
+      return;
+    }
+
+    // 调用现有的添加逻辑
+    await this.handleAddCommand(chatId, [symbol]);
+  }
+
+  /**
    * 处理帮助命令
    */
   private async handleHelpCommand(chatId: number): Promise<void> {
@@ -743,24 +863,29 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
 
 /help - 显示此帮助信息
 /list - 查看当前监控的交易对
-/add &lt;交易对&gt; - 添加监控交易对（全周期）
-/remove &lt;交易对&gt; - 删除监控交易对（全周期）
-/analyze &lt;交易对&gt; - 立即分析交易对（全周期）
+/add [交易对] - 添加监控交易对（全周期）
+/remove [交易对] - 删除监控交易对（全周期）
+/analyze [交易对] - 立即分析交易对（全周期）
+
+✨ <b>交互式操作:</b>
+
+• <code>/add</code> - 进入添加模式，然后输入交易对名称
+• <code>/remove</code> - 显示监控列表，点击删除
+• <code>/analyze</code> - 显示监控列表，点击分析
 
 📝 <b>使用示例:</b>
 
-<code>/add BTCUSDT</code> - 添加 BTC 全周期监控
-<code>/remove ETHUSDT</code> - 删除 ETH 全周期监控  
-<code>/analyze SOLUSDT</code> - 立即分析 SOL 全周期
+<code>/add BTCUSDT</code> - 直接添加 BTC 全周期监控
+<code>/add</code> ➜ <code>BTCUSDT</code> - 交互式添加
+<code>/remove</code> ➜ 点击删除按钮
+<code>/analyze</code> ➜ 点击分析按钮
 
 ⏱️ <b>监控周期:</b>
 系统将对每个交易对监控以下4个周期：
-• 5分钟 (5m)
-• 15分钟 (15m)  
-• 1小时 (1h)
-• 4小时 (4h)
+• 5分钟 (5m) • 15分钟 (15m) • 1小时 (1h) • 4小时 (4h)
 
 💡 <b>提示:</b>
+• 支持传统命令和交互式操作两种方式
 • 一个命令操作所有4个周期
 • 交易对名称不区分大小写
 • 系统会自动发送多周期综合分析通知
@@ -844,7 +969,14 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
    */
   private async handleAddCommand(chatId: number, args: string[]): Promise<void> {
     if (args.length === 0) {
-      await this.sendCommandMessage(chatId, `❌ 请提供交易对名称\n\n示例: <code>/add BTCUSDT</code>`);
+      // 进入等待输入状态
+      const userId = chatId.toString();
+      this.setUserState(userId, 'waiting_add_symbol');
+      
+      await this.sendCommandMessage(
+        chatId, 
+        `📝 请输入要添加的交易对名称：\n\n💡 示例：BTCUSDT、ETHUSDT、SOLUSDT\n\n⏱️ 系统将自动为该交易对添加全周期监控（5m/15m/1h/4h）\n\n❌ 发送任意命令可取消操作`
+      );
       return;
     }
 
@@ -920,7 +1052,8 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
    */
   private async handleRemoveCommand(chatId: number, args: string[]): Promise<void> {
     if (args.length === 0) {
-      await this.sendCommandMessage(chatId, `❌ 请提供交易对名称\n\n示例: <code>/remove BTCUSDT</code>`);
+      // 显示可删除的监控列表
+      await this.showInteractiveRemoveList(chatId);
       return;
     }
 
@@ -981,7 +1114,8 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
    */
   private async handleAnalyzeCommand(chatId: number, args: string[]): Promise<void> {
     if (args.length === 0) {
-      await this.sendCommandMessage(chatId, `❌ 请提供交易对名称\n\n示例: <code>/analyze BTCUSDT</code>`);
+      // 显示可分析的监控列表
+      await this.showInteractiveAnalyzeList(chatId);
       return;
     }
 
@@ -1296,6 +1430,9 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
           } else if (data.startsWith('remove_')) {
             const symbol = data.replace('remove_', '');
             await this.handleRemoveCommand(chatId, [symbol]);
+          } else if (data.startsWith('analyze_')) {
+            const symbol = data.replace('analyze_', '');
+            await this.handleAnalyzeCommand(chatId, [symbol]);
           } else {
             this.logger.warn(`未知的回调数据: ${data}`);
           }
@@ -1348,6 +1485,82 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
     } catch (error) {
       this.logger.error('显示删除菜单失败:', error);
       await this.sendCommandMessage(chatId, '❌ 显示删除菜单失败，请稍后重试');
+    }
+  }
+
+  /**
+   * 显示交互式删除列表（用于 /remove 命令）
+   */
+  private async showInteractiveRemoveList(chatId: number): Promise<void> {
+    try {
+      const activeConfigs = await this.coinConfigService.findActiveConfigs();
+      
+      if (activeConfigs.length === 0) {
+        await this.sendCommandMessage(
+          chatId, 
+          '📝 <b>删除监控</b>\n\n暂无监控的交易对\n\n💡 使用 <code>/add BTCUSDT</code> 添加监控'
+        );
+        return;
+      }
+
+      // 按交易对分组
+      const symbols = [...new Set(activeConfigs.map(config => config.symbol))];
+      
+      const buttons = symbols.map(symbol => [
+        { text: `❌ 删除 ${symbol}`, callback_data: `remove_${symbol}` }
+      ]);
+
+      const replyMarkup = {
+        inline_keyboard: buttons
+      };
+
+      const message = `📝 <b>删除监控</b>\n\n请选择要删除的交易对：\n\n⚠️ 删除后将停止该交易对的全周期监控`;
+
+      await this.bot.sendMessage(chatId, message, {
+        parse_mode: 'HTML',
+        reply_markup: replyMarkup
+      });
+    } catch (error) {
+      this.logger.error('显示交互式删除列表失败:', error);
+      await this.sendCommandMessage(chatId, '❌ 获取监控列表失败，请稍后重试');
+    }
+  }
+
+  /**
+   * 显示交互式分析列表（用于 /analyze 命令）
+   */
+  private async showInteractiveAnalyzeList(chatId: number): Promise<void> {
+    try {
+      const activeConfigs = await this.coinConfigService.findActiveConfigs();
+      
+      if (activeConfigs.length === 0) {
+        await this.sendCommandMessage(
+          chatId, 
+          '📝 <b>立即分析</b>\n\n暂无监控的交易对\n\n💡 使用 <code>/add BTCUSDT</code> 先添加监控\n💡 或直接使用 <code>/analyze BTCUSDT</code> 分析任意交易对'
+        );
+        return;
+      }
+
+      // 按交易对分组
+      const symbols = [...new Set(activeConfigs.map(config => config.symbol))];
+      
+      const buttons = symbols.map(symbol => [
+        { text: `🔍 分析 ${symbol}`, callback_data: `analyze_${symbol}` }
+      ]);
+
+      const replyMarkup = {
+        inline_keyboard: buttons
+      };
+
+      const message = `📝 <b>立即分析</b>\n\n请选择要分析的交易对：\n\n⚡ 将进行全周期技术分析（5m/15m/1h/4h）`;
+
+      await this.bot.sendMessage(chatId, message, {
+        parse_mode: 'HTML',
+        reply_markup: replyMarkup
+      });
+    } catch (error) {
+      this.logger.error('显示交互式分析列表失败:', error);
+      await this.sendCommandMessage(chatId, '❌ 获取监控列表失败，请稍后重试');
     }
   }
 

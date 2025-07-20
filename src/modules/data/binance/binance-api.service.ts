@@ -199,11 +199,8 @@ export class BinanceApiService {
     try {
       return await this.axiosInstance.get<T>(url, config);
     } catch (error) {
-      if (retryCount < this.maxRetries && this.shouldRetry(error)) {
-        this.logger.warn(`请求失败，进行第 ${retryCount + 1} 次重试: ${url}`);
-        await this.delay(this.retryDelay * Math.pow(2, retryCount)); // 指数退避
-        return this.makeRequestWithRetry<T>(url, config, retryCount + 1);
-      }
+      // 禁用重试机制，失败立即抛出错误
+      this.logger.error(`请求失败，不进行重试: ${url}`);
       throw error;
     }
   }
@@ -212,13 +209,8 @@ export class BinanceApiService {
    * 判断是否应该重试
    */
   private shouldRetry(error: any): boolean {
-    if (!error.response) {
-      return true; // 网络错误，重试
-    }
-
-    const status = error.response.status;
-    // 对于5xx错误和429(限流)错误进行重试
-    return status >= 500 || status === 429;
+    // 禁用所有重试
+    return false;
   }
 
   /**

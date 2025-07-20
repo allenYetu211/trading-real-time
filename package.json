@@ -26,6 +26,7 @@
     "test:telegram": "npx ts-node scripts/test-telegram.ts",
     "test:telegram-commands": "npx ts-node scripts/test-telegram-commands.ts",
     "test:telegram-menu": "npx ts-node scripts/test-telegram-menu.ts",
+    "test:telegram-interactive": "npx ts-node scripts/test-interactive-telegram.ts",
     "test:analysis": "npx ts-node scripts/test-realtime-analysis.ts",
     "test:api": "npx ts-node scripts/test-api.ts"
   },
