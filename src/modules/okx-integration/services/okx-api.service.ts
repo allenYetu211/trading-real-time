@@ -3,7 +3,15 @@ import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import * as CryptoJS from 'crypto-js';
 import { OkxConfig } from 'src/config/okx.config';
-import { OkxOrderData, OkxApiResponse, SyncParams } from '../interfaces/okx-trade.interface';
+import { 
+  OkxOrderData, 
+  OkxApiResponse, 
+  SyncParams,
+  OkxFillData,
+  OkxPendingOrderData,
+  OkxPositionData,
+  OkxDataResponse
+} from '../interfaces/okx-trade.interface';
 
 @Injectable()
 export class OkxApiService {
@@ -128,7 +136,7 @@ export class OkxApiService {
       this.logger.log(`获取 OKX 最近订单，参数: ${JSON.stringify(queryParams)}`);
 
       const response = await this.httpClient.get<OkxApiResponse<OkxOrderData>>(
-        '/api/v5/trade/orders-pending',
+        '/api/v5/trade/orders-history',
         { params: queryParams }
       );
 
@@ -141,6 +149,219 @@ export class OkxApiService {
     } catch (error: any) {
       this.logger.error('获取 OKX 最近订单失败:', error.response?.data || error.message);
       throw error;
+    }
+  }
+
+  /**
+   * 获取当前挂单（未成交订单）
+   */
+  async getPendingOrders(params: SyncParams = {}): Promise<OkxPendingOrderData[]> {
+    try {
+      if (!this.isConfigured()) {
+        throw new Error('OKX API 配置不完整');
+      }
+
+      const queryParams = {
+        instType: params.instType || 'SWAP',
+        ...(params.after && { after: params.after }),
+        ...(params.before && { before: params.before }),
+      };
+
+      this.logger.log(`获取 OKX 当前挂单，参数: ${JSON.stringify(queryParams)}`);
+
+      const response = await this.httpClient.get<OkxApiResponse<OkxPendingOrderData>>(
+        '/api/v5/trade/orders-pending',
+        { params: queryParams }
+      );
+
+      if (response.data.code === '0') {
+        this.logger.log(`成功获取 ${response.data.data.length} 笔当前挂单`);
+        return response.data.data;
+      } else {
+        throw new Error(`OKX API 错误: ${response.data.msg}`);
+      }
+    } catch (error: any) {
+      this.logger.error('获取 OKX 当前挂单失败:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取成交明细（fills）- 这个API更准确地反映实际交易
+   */
+  async getTradeHistory(params: SyncParams = {}): Promise<OkxFillData[]> {
+    try {
+      if (!this.isConfigured()) {
+        throw new Error('OKX API 配置不完整');
+      }
+
+      const queryParams = {
+        instType: params.instType || 'SWAP',
+        limit: params.limit || 100,
+        ...(params.after && { after: params.after }),
+        ...(params.before && { before: params.before }),
+      };
+
+      this.logger.log(`获取 OKX 成交明细，参数: ${JSON.stringify(queryParams)}`);
+
+      const response = await this.httpClient.get<OkxApiResponse<OkxFillData>>(
+        '/api/v5/trade/fills',
+        { params: queryParams }
+      );
+
+      if (response.data.code === '0') {
+        this.logger.log(`成功获取 ${response.data.data.length} 笔成交明细`);
+        return response.data.data;
+      } else {
+        throw new Error(`OKX API 错误: ${response.data.msg}`);
+      }
+    } catch (error: any) {
+      this.logger.error('获取 OKX 成交明细失败:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取历史成交明细（超过3个月的数据）
+   */
+  async getTradeHistoryArchive(params: SyncParams = {}): Promise<OkxFillData[]> {
+    try {
+      if (!this.isConfigured()) {
+        throw new Error('OKX API 配置不完整');
+      }
+
+      const queryParams = {
+        instType: params.instType || 'SWAP',
+        limit: params.limit || 100,
+        ...(params.after && { after: params.after }),
+        ...(params.before && { before: params.before }),
+      };
+
+      this.logger.log(`获取 OKX 历史成交明细，参数: ${JSON.stringify(queryParams)}`);
+
+      const response = await this.httpClient.get<OkxApiResponse<OkxFillData>>(
+        '/api/v5/trade/fills-history',
+        { params: queryParams }
+      );
+
+      if (response.data.code === '0') {
+        this.logger.log(`成功获取 ${response.data.data.length} 笔历史成交明细`);
+        return response.data.data;
+      } else {
+        throw new Error(`OKX API 错误: ${response.data.msg}`);
+      }
+    } catch (error: any) {
+      this.logger.error('获取 OKX 历史成交明细失败:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取当前持仓
+   */
+  async getAccountPositions(params: SyncParams = {}): Promise<OkxPositionData[]> {
+    try {
+      if (!this.isConfigured()) {
+        throw new Error('OKX API 配置不完整');
+      }
+
+      const queryParams = {
+        instType: params.instType || 'SWAP',
+      };
+
+      this.logger.log(`获取 OKX 当前持仓，参数: ${JSON.stringify(queryParams)}`);
+
+      const response = await this.httpClient.get<OkxApiResponse<OkxPositionData>>(
+        '/api/v5/account/positions',
+        { params: queryParams }
+      );
+
+      if (response.data.code === '0') {
+        this.logger.log(`成功获取 ${response.data.data.length} 个当前持仓`);
+        return response.data.data;
+      } else {
+        throw new Error(`OKX API 错误: ${response.data.msg}`);
+      }
+    } catch (error: any) {
+      this.logger.error('获取 OKX 当前持仓失败:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取完整的OKX数据（包括订单、成交明细、挂单、持仓）
+   */
+  async getCompleteOkxData(params: SyncParams = {}): Promise<OkxDataResponse> {
+    try {
+      this.logger.log('开始获取完整的OKX数据');
+
+      // 并行获取所有数据
+      const [orders, fills, pendingOrders, positions] = await Promise.all([
+        this.getRecentOrders(params),
+        this.getTradeHistory(params),
+        this.getPendingOrders(params),
+        this.getAccountPositions(params),
+      ]);
+
+      this.logger.log(`完整数据获取成功: 订单${orders.length}笔, 成交${fills.length}笔, 挂单${pendingOrders.length}笔, 持仓${positions.length}个`);
+
+      return {
+        orders,
+        fills,
+        pendingOrders,
+        positions,
+      };
+    } catch (error: any) {
+      this.logger.error('获取完整OKX数据失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取已完成的交易记录（简化版本）
+   * 直接获取已成交的订单，不进行复杂分组
+   */
+  async getCompletedTrades(params: SyncParams = {}): Promise<{ success: boolean; data: OkxOrderData[]; message: string }> {
+    const { limit = 20, instType = 'SWAP' } = params;
+    
+    try {
+      if (!this.isConfigured()) {
+        throw new Error('OKX API 配置不完整');
+      }
+
+      this.logger.log(`获取已完成交易记录，限制：${limit} 条`);
+
+      const queryParams = {
+        instType,
+        state: 'filled', // 只获取已完成的订单
+        limit: limit.toString(),
+      };
+
+      // 只获取已完成的订单
+      const response = await this.httpClient.get<OkxApiResponse<OkxOrderData>>(
+        '/api/v5/trade/orders-history',
+        { params: queryParams }
+      );
+
+      if (response.data.code === '0') {
+        const orders = response.data.data;
+        this.logger.log(`成功获取 ${orders.length} 条已完成订单`);
+
+        return {
+          success: true,
+          data: orders,
+          message: `获取到 ${orders.length} 条已完成交易记录`,
+        };
+      } else {
+        throw new Error(`OKX API 错误: ${response.data.msg}`);
+      }
+    } catch (error: any) {
+      this.logger.error('获取已完成交易记录失败:', error.response?.data || error.message);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.msg || error.message,
+      };
     }
   }
 

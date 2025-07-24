@@ -1,230 +1,92 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from '../src/app.module';
 import { TelegramService } from '../src/modules/notification/services/telegram.service';
-import { CoinConfigService } from '../src/modules/coin-config/coin-config.service';
-import { IntervalType } from '../src/shared/enums';
 
 async function testTelegramMenu() {
-  console.log('🚀 开始测试 Telegram 菜单功能...\n');
+  console.log('🤖 开始测试 Telegram 菜单状态...\n');
+
+  const app = await NestFactory.createApplicationContext(AppModule);
+  const telegramService = app.get(TelegramService);
 
   try {
-    // 创建应用实例
-    const app = await NestFactory.createApplicationContext(AppModule);
-    
-    // 获取服务实例
-    const telegramService = app.get(TelegramService);
-    const coinConfigService = app.get(CoinConfigService);
-
-    // 1. 测试 Telegram 服务状态
-    console.log('1️⃣ 测试 Telegram 服务状态...');
+    // 1. 检查服务状态
+    console.log('1️⃣ 检查 Telegram 服务状态...');
     const isEnabled = telegramService.isEnabled();
-    console.log(`   Telegram 服务状态: ${isEnabled ? '✅ 已启用' : '❌ 未启用'}`);
-
+    console.log(`服务状态: ${isEnabled ? '✅ 已启用' : '❌ 未启用'}`);
+    
     if (!isEnabled) {
-      console.log('   ⚠️ Telegram 服务未启用，请检查配置');
-      console.log('   💡 确保以下环境变量已设置:');
-      console.log('   - TELEGRAM_BOT_TOKEN');
-      console.log('   - TELEGRAM_CHAT_ID');
-      console.log('   - TELEGRAM_ENABLED=true');
+      console.log('\n❌ Telegram 服务未启用，请检查环境配置');
       await app.close();
       return;
     }
 
-    // 2. 测试 Bot 信息
-    console.log('\n2️⃣ 获取 Bot 信息...');
-    const botInfo = await telegramService.getBotInfo();
-    if (botInfo) {
-      console.log(`   ✅ Bot 用户名: @${botInfo.username}`);
-      console.log(`   ✅ Bot 名称: ${botInfo.first_name}`);
-      console.log(`   ✅ Bot ID: ${botInfo.id}`);
+    // 2. 获取当前 Bot 命令列表
+    console.log('\n2️⃣ 获取当前 Bot 命令列表...');
+    const commands = await telegramService.getBotCommands();
+    
+    if (commands) {
+      console.log(`✅ 当前已设置 ${commands.length} 个命令:`);
+      commands.forEach((cmd, index) => {
+        console.log(`   ${index + 1}. /${cmd.command} - ${cmd.description}`);
+      });
     } else {
-      console.log('   ❌ 无法获取 Bot 信息');
+      console.log('❌ 无法获取命令列表，可能是网络或权限问题');
     }
 
-    // 3. 测试命令菜单设置
-    console.log('\n3️⃣ 测试命令菜单设置...');
+    // 3. 重新初始化菜单（如果需要）
+    console.log('\n3️⃣ 尝试重新初始化菜单...');
     try {
-      const commands = await telegramService.getBotCommands();
-      if (commands && commands.length > 0) {
-        console.log(`   ✅ 找到 ${commands.length} 个命令:`);
-        commands.forEach((cmd: any) => {
-          console.log(`      /${cmd.command} - ${cmd.description}`);
-        });
+      // 通过反射访问私有方法来重新初始化菜单
+      const initializeMenus = (telegramService as any).initializeMenus;
+      if (typeof initializeMenus === 'function') {
+        await initializeMenus.call(telegramService);
+        console.log('✅ 菜单重新初始化完成');
       } else {
-        console.log('   ⚠️ 未找到命令列表');
+        console.log('⚠️ 无法访问菜单初始化方法');
       }
     } catch (error) {
-      console.log(`   ❌ 获取命令列表失败: ${error.message}`);
+      console.log('❌ 菜单初始化失败:', error.message);
     }
 
-    // 4. 发送菜单功能介绍消息
-    console.log('\n4️⃣ 发送菜单功能介绍消息...');
-    const introMessage = `
-🎉 <b>Telegram 菜单功能已上线!</b>
-
-🆕 <b>新增功能:</b>
-
-📋 <b>命令菜单</b>
-• 在输入框旁边点击 "菜单" 按钮
-• 或输入 "/" 查看所有可用命令
-
-📱 <b>内联菜单</b>
-• 使用 /menu 命令打开快捷操作面板
-• 点击按钮直接执行操作
-• 无需记忆复杂命令
-
-⚡ <b>快捷操作</b>
-• 📊 查看监控：快速查看监控列表
-• ➕ 添加监控：引导添加新的交易对监控
-• ❌ 删除监控：选择要删除的交易对
-• 🔍 快速分析：直接分析特定交易对
-
-🎯 <b>智能交互</b>
-• 动态显示交易对按钮
-• 一键操作，无需输入命令
-• 错误处理和操作反馈
-
-💡 试试以下命令体验新功能：
-• /menu - 打开快捷操作面板
-• /help - 查看增强的帮助信息
-`.trim();
-
-    const introSent = await telegramService.sendCustomMessage(introMessage);
-    console.log(`   ${introSent ? '✅' : '❌'} 功能介绍消息发送${introSent ? '成功' : '失败'}`);
-
-    // 5. 测试添加一些示例监控配置（为菜单测试准备数据）
-    console.log('\n5️⃣ 添加示例监控配置...');
-    const sampleConfigs = [
-      { symbol: 'BTCUSDT', interval: IntervalType.ONE_HOUR },
-      { symbol: 'ETHUSDT', interval: IntervalType.FOUR_HOURS },
-      { symbol: 'ADAUSDT', interval: IntervalType.FIFTEEN_MINUTES },
-      { symbol: 'SOLUSDT', interval: IntervalType.FIVE_MINUTES },
-    ];
-
-    for (const config of sampleConfigs) {
-      try {
-        // 检查是否已存在
-        const existing = await coinConfigService.findBySymbolAndInterval(config.symbol, config.interval);
-        if (existing && existing.isActive) {
-          console.log(`   ✅ ${config.symbol} ${config.interval} 已存在且已激活`);
-          continue;
-        }
-
-        if (existing && !existing.isActive) {
-          // 重新激活
-          await coinConfigService.update(existing.id, { isActive: true });
-          console.log(`   ✅ 重新激活 ${config.symbol} ${config.interval}`);
-        } else {
-          // 创建新配置
-          await coinConfigService.create({
-            symbol: config.symbol,
-            interval: config.interval,
-            isActive: true,
-          });
-          console.log(`   ✅ 创建 ${config.symbol} ${config.interval} 监控配置`);
-        }
-      } catch (error) {
-        console.log(`   ❌ 配置 ${config.symbol} ${config.interval} 失败: ${error.message}`);
-      }
-    }
-
-    // 6. 测试菜单面板
-    console.log('\n6️⃣ 测试菜单面板...');
-    const activeConfigs = await coinConfigService.findActiveConfigs();
-    const symbolCount = [...new Set(activeConfigs.map(c => c.symbol))].length;
-
-    const menuTestMessage = `
-🧪 <b>菜单功能测试</b>
-
-📊 当前监控状态：
-• 交易对数量: ${symbolCount} 个
-• 总配置数量: ${activeConfigs.length} 个
-
-🎯 <b>测试指南：</b>
-
-1️⃣ 发送 <code>/menu</code> 命令
-   查看快捷操作面板
-
-2️⃣ 点击 "📊 查看监控" 按钮
-   测试内联键盘功能
-
-3️⃣ 点击 "➕ 添加监控" 按钮
-   测试添加引导功能
-
-4️⃣ 点击 "❌ 删除监控" 按钮
-   测试删除菜单功能
-
-5️⃣ 点击任意交易对分析按钮
-   测试快速分析功能
-
-🔄 所有按钮都支持实时交互，无需刷新页面！
-
-💡 菜单按钮位于输入框旁边，点击即可查看所有命令。
-`.trim();
-
-    const menuTestSent = await telegramService.sendCustomMessage(menuTestMessage);
-    console.log(`   ${menuTestSent ? '✅' : '❌'} 菜单测试指南发送${menuTestSent ? '成功' : '失败'}`);
-
-    // 7. 发送最终使用说明
-    console.log('\n7️⃣ 发送使用说明...');
-    const guideMessage = `
-📖 <b>Telegram 菜单使用指南</b>
-
-🎯 <b>三种菜单使用方式：</b>
-
-1️⃣ <b>命令菜单</b>
-   • 点击输入框旁边的 "菜单" 按钮
-   • 或直接输入 "/" 查看命令列表
-   • 适合熟悉命令的用户
-
-2️⃣ <b>快捷面板</b>
-   • 发送 /menu 命令
-   • 使用内联按钮快速操作
-   • 适合频繁操作的用户
-
-3️⃣ <b>文字命令</b>
-   • 直接输入命令（如 /add BTCUSDT）
-   • 适合精确控制的用户
-
-🌟 <b>推荐工作流程：</b>
-
-🚀 新用户：/start → /help → /menu
-📊 查看数据：/menu → 点击 "查看监控"
-➕ 添加监控：/menu → 点击 "添加监控"
-🔍 快速分析：/menu → 点击交易对按钮
-
-✨ 现在开始体验全新的菜单功能吧！
-`.trim();
-
-    const guideSent = await telegramService.sendCustomMessage(guideMessage);
-    console.log(`   ${guideSent ? '✅' : '❌'} 使用指南发送${guideSent ? '成功' : '失败'}`);
-
-    console.log('\n✅ Telegram 菜单功能测试完成!');
-    console.log('\n💡 现在您可以在 Telegram 中体验以下功能:');
-    console.log('   • 命令菜单（点击输入框旁边的菜单按钮）');
-    console.log('   • 快捷面板（发送 /menu 命令）');
-    console.log('   • 增强的帮助信息（发送 /help 命令）');
-    console.log('   • 内联键盘操作（点击任意按钮测试）');
+    // 4. 再次检查命令列表
+    console.log('\n4️⃣ 再次检查命令列表...');
+    const updatedCommands = await telegramService.getBotCommands();
     
-    await app.close();
+    if (updatedCommands) {
+      console.log(`✅ 更新后的命令列表 (${updatedCommands.length} 个命令):`);
+      updatedCommands.forEach((cmd, index) => {
+        console.log(`   ${index + 1}. /${cmd.command} - ${cmd.description}`);
+      });
+    }
+
+    // 5. 发送测试消息验证菜单功能
+    console.log('\n5️⃣ 发送测试消息验证菜单功能...');
+    const testResult = await telegramService.sendNotification({
+      title: '🔧 菜单测试',
+      message: `菜单状态检查完成\n\n当前可用命令: ${updatedCommands?.length || 0} 个\n\n请在 Telegram 中输入 /menu 或 /help 测试菜单功能`,
+      type: 'info',
+      timestamp: new Date().toISOString(),
+    });
+    
+    if (testResult) {
+      console.log('✅ 测试消息发送成功');
+    } else {
+      console.log('❌ 测试消息发送失败');
+    }
+
+    console.log('\n📝 故障排除建议:');
+    console.log('1. 确认 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 配置正确');
+    console.log('2. 检查 Bot 是否被 BotFather 停用');
+    console.log('3. 在 Telegram 中尝试发送 /start 命令重新启动对话');
+    console.log('4. 确认网络连接正常，可以访问 Telegram API');
+    console.log('5. 重启应用服务，让菜单重新初始化');
 
   } catch (error) {
-    console.error('❌ 测试失败:', error);
-    process.exit(1);
+    console.error('❌ 测试过程中发生错误:', error);
+  } finally {
+    await app.close();
   }
 }
 
-// 运行测试
-if (require.main === module) {
-  testTelegramMenu()
-    .then(() => {
-      console.log('\n🎉 菜单功能测试完成');
-      process.exit(0);
-    })
-    .catch((error) => {
-      console.error('💥 测试出错:', error);
-      process.exit(1);
-    });
-}
-
-export { testTelegramMenu }; 
+// 直接运行测试
+testTelegramMenu().catch(console.error); 

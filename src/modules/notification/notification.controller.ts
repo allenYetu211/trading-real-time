@@ -253,4 +253,24 @@ export class NotificationController {
       );
     }
   }
+
+  /**
+   * 重新初始化 Telegram 菜单
+   */
+  @Post('telegram/reinit-menu')
+  async reinitializeTelegramMenu() {
+    try {
+      const result = await this.telegramService.reinitializeMenus();
+      return {
+        success: true,
+        message: '菜单重新初始化完成',
+        data: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `菜单重新初始化失败: ${error.message}`,
+      };
+    }
+  }
 } 

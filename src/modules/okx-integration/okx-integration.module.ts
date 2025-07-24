@@ -1,25 +1,25 @@
-import { Module, forwardRef } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
-import { okxConfig } from 'src/config';
-import { TradingHistoryModule } from '../trading-history/trading-history.module';
+import { Module } from '@nestjs/common';
 import { OkxApiService } from './services/okx-api.service';
-import { TradeProcessorService } from './services/trade-processor.service';
 import { OkxSyncService } from './services/okx-sync.service';
+import { TradeProcessorService } from './services/trade-processor.service';
+import { PendingOrderProcessorService } from './services/pending-order-processor.service';
+import { OkxIntegrationController } from './okx-integration.controller';
+import { TradingHistoryModule } from '../trading-history/trading-history.module';
 
 @Module({
-  imports: [
-    ConfigModule.forFeature(okxConfig),
-    forwardRef(() => TradingHistoryModule),
-  ],
+  imports: [TradingHistoryModule],
+  controllers: [OkxIntegrationController],
   providers: [
     OkxApiService,
-    TradeProcessorService,
     OkxSyncService,
+    TradeProcessorService,
+    PendingOrderProcessorService,
   ],
   exports: [
     OkxApiService,
-    TradeProcessorService,
     OkxSyncService,
+    TradeProcessorService,
+    PendingOrderProcessorService,
   ],
 })
 export class OkxIntegrationModule {} 

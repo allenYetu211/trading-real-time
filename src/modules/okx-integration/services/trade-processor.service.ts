@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OkxOrderData, ProcessedTradeData } from '../interfaces/okx-trade.interface';
+import { OkxOrderData, ProcessedTradeData, OkxFillData } from '../interfaces/okx-trade.interface';
 
 @Injectable()
 export class TradeProcessorService {
@@ -33,28 +33,419 @@ export class TradeProcessorService {
   }
 
   /**
-   * 按交易对和持仓方向分组订单
+   * 处理 OKX 成交明细数据，转换为系统交易记录
+   * 这个方法比处理订单数据更准确，因为成交明细反映了真实的交易情况
+   */
+  async processFillData(fills: OkxFillData[]): Promise<ProcessedTradeData[]> {
+    this.logger.log(`开始处理 ${fills.length} 笔 OKX 成交明细数据`);
+
+    // 按交易对和持仓方向分组成交明细
+    const groupedTrades = this.groupFillsByTrade(fills);
+    
+    // 转换为系统交易记录
+    const processedTrades: ProcessedTradeData[] = [];
+    
+    for (const [tradeKey, tradeFills] of groupedTrades.entries()) {
+      try {
+        const processedTrade = this.convertFillsToTradeRecord(tradeKey, tradeFills);
+        if (processedTrade) {
+          processedTrades.push(processedTrade);
+        }
+      } catch (error) {
+        this.logger.error(`处理成交明细组 ${tradeKey} 失败:`, error);
+      }
+    }
+
+    this.logger.log(`从成交明细成功处理 ${processedTrades.length} 笔交易记录`);
+    return processedTrades;
+  }
+
+  /**
+   * 简化处理：将已完成的订单直接转换为交易记录
+   * 不进行复杂的分组逻辑
+   */
+  async processCompletedOrders(orders: OkxOrderData[]): Promise<ProcessedTradeData[]> {
+    this.logger.log(`开始处理 ${orders.length} 笔已完成的 OKX 订单`);
+
+    const processedTrades: ProcessedTradeData[] = [];
+    
+    for (const order of orders) {
+      try {
+        // 只处理已完成的订单
+        if (order.state !== 'filled') {
+          continue;
+        }
+
+        // 将单个订单转换为交易记录
+        const processedTrade = this.convertOrderToTrade(order);
+        if (processedTrade) {
+          processedTrades.push(processedTrade);
+        }
+      } catch (error) {
+        this.logger.error(`处理订单 ${order.ordId} 失败:`, error);
+      }
+    }
+
+    this.logger.log(`成功处理 ${processedTrades.length} 笔交易记录`);
+    return processedTrades;
+  }
+
+  /**
+   * 将单个已完成订单转换为交易记录
+   */
+  private convertOrderToTrade(order: OkxOrderData): ProcessedTradeData | null {
+    try {
+      const instrument = order.instId;
+      const direction = this.mapOrderSideToDirection(order.side, order.posSide);
+      
+      // 使用订单ID作为交易ID
+      const tradeId = order.ordId;
+      
+      return {
+        tradeId,
+        instrument,
+        direction,
+        status: 'CLOSED', // 已完成的订单状态为CLOSED
+        entryTime: new Date(parseInt(order.fillTime)), // 使用最新成交时间
+        actualEntryPrice: parseFloat(order.avgPx || order.fillPx), // 使用成交均价
+        actualExitPrice: parseFloat(order.avgPx || order.fillPx), // 对于已完成订单，进出价相同
+        positionSize: parseFloat(order.accFillSz), // 累计成交数量
+        pnl: order.pnl ? parseFloat(order.pnl) : 0,
+        fees: order.fee ? parseFloat(order.fee) : 0,
+        leverage: order.lever ? parseFloat(order.lever) : 1,
+        okxOrderIds: [order.ordId],
+        rawData: order,
+      };
+    } catch (error) {
+      this.logger.error(`转换订单 ${order.ordId} 失败:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 按交易对和持仓方向分组成交明细
+   */
+  private groupFillsByTrade(fills: OkxFillData[]): Map<string, OkxFillData[]> {
+    const groups = new Map<string, OkxFillData[]>();
+
+    // 按时间排序
+    const sortedFills = fills.sort((a, b) => parseInt(a.ts) - parseInt(b.ts));
+
+    // 按交易对和方向分组
+    const instrumentGroups = new Map<string, OkxFillData[]>();
+    
+    for (const fill of sortedFills) {
+      const instrumentKey = `${fill.instId}_${fill.posSide}`;
+      if (!instrumentGroups.has(instrumentKey)) {
+        instrumentGroups.set(instrumentKey, []);
+      }
+      instrumentGroups.get(instrumentKey)!.push(fill);
+    }
+
+    // 对每个交易对+方向组合进行智能分组
+    for (const [instrumentKey, instrumentFills] of instrumentGroups.entries()) {
+      const tradeGroups = this.smartGroupFillsByPosition(instrumentFills);
+      
+      // 将分组结果添加到总结果中
+      tradeGroups.forEach((group, index) => {
+        const groupKey = `${instrumentKey}_${index}`;
+        groups.set(groupKey, group);
+      });
+    }
+
+    return groups;
+  }
+
+  /**
+   * 基于仓位逻辑的智能成交明细分组
+   */
+  private smartGroupFillsByPosition(fills: OkxFillData[]): OkxFillData[][] {
+    const tradeGroups: OkxFillData[][] = [];
+    let currentGroup: OkxFillData[] = [];
+    let currentPosition = 0; // 当前净仓位
+    
+    this.logger.debug(`开始分组 ${fills.length} 个成交明细，交易对: ${fills[0]?.instId}, 方向: ${fills[0]?.posSide}`);
+    
+    for (const fill of fills) {
+      const fillSize = parseFloat(fill.fillSz);
+      const isOpening = this.isOpeningFill(fill);
+      
+      this.logger.debug(`成交: ${fill.side} ${fillSize}, 开仓: ${isOpening}, 当前仓位: ${currentPosition}`);
+      
+      if (isOpening) {
+        // 开仓成交
+        if (currentPosition === 0 && currentGroup.length > 0) {
+          // 新交易开始，保存之前的交易
+          tradeGroups.push([...currentGroup]);
+          currentGroup = [];
+        }
+        currentGroup.push(fill);
+        currentPosition += fillSize;
+      } else {
+        // 平仓成交
+        if (currentGroup.length > 0) {
+          currentGroup.push(fill);
+          currentPosition -= fillSize;
+          
+          // 如果仓位接近于0，说明这笔交易完成
+          if (Math.abs(currentPosition) < 0.0001) {
+            tradeGroups.push([...currentGroup]);
+            this.logger.debug(`完成一笔交易，包含 ${currentGroup.length} 个成交明细`);
+            currentGroup = [];
+            currentPosition = 0;
+          }
+        }
+      }
+    }
+    
+    // 处理未完成的交易（持仓中）
+    if (currentGroup.length > 0) {
+      this.logger.debug(`添加未完成交易，包含 ${currentGroup.length} 个成交明细`);
+      tradeGroups.push(currentGroup);
+    }
+    
+    this.logger.debug(`成交明细分组完成，总共 ${tradeGroups.length} 笔交易`);
+    return tradeGroups;
+  }
+
+  /**
+   * 判断成交明细是否为开仓
+   */
+  private isOpeningFill(fill: OkxFillData): boolean {
+    // 对于永续合约的仓位逻辑：
+    // long 方向：buy = 开多仓, sell = 平多仓
+    // short 方向：sell = 开空仓, buy = 平空仓
+    
+    if (fill.posSide === 'long') {
+      return fill.side === 'buy'; // 买入 = 开多仓
+    } else if (fill.posSide === 'short') {
+      return fill.side === 'sell'; // 卖出 = 开空仓
+    }
+    
+    return true; // 默认当作开仓
+  }
+
+  /**
+   * 将成交明细组转换为交易记录
+   */
+  private convertFillsToTradeRecord(tradeKey: string, fills: OkxFillData[]): ProcessedTradeData | null {
+    if (fills.length === 0) return null;
+
+    // 按时间排序
+    fills.sort((a, b) => parseInt(a.ts) - parseInt(b.ts));
+
+    const firstFill = fills[0];
+    const lastFill = fills[fills.length - 1];
+
+    // 分离开仓和平仓成交
+    const openFills = fills.filter(fill => 
+      (fill.side === 'buy' && fill.posSide === 'long') ||
+      (fill.side === 'sell' && fill.posSide === 'short')
+    );
+    
+    const closeFills = fills.filter(fill => 
+      (fill.side === 'sell' && fill.posSide === 'long') ||
+      (fill.side === 'buy' && fill.posSide === 'short')
+    );
+
+    // 计算基础信息
+    const instrument = this.normalizeInstrument(firstFill.instId);
+    const direction = firstFill.posSide === 'long' ? 'LONG' : 'SHORT';
+    const status = closeFills.length > 0 ? 'CLOSED' : 'OPEN';
+
+    // 计算开仓均价
+    let totalOpenSize = 0;
+    let totalOpenValue = 0;
+    for (const fill of openFills) {
+      const size = parseFloat(fill.fillSz);
+      const price = parseFloat(fill.fillPx);
+      totalOpenSize += size;
+      totalOpenValue += size * price;
+    }
+    
+    const actualEntryPrice = totalOpenSize > 0 ? totalOpenValue / totalOpenSize : 0;
+
+    // 计算平仓均价
+    let actualExitPrice: number | undefined;
+    if (closeFills.length > 0) {
+      let totalCloseSize = 0;
+      let totalCloseValue = 0;
+      for (const fill of closeFills) {
+        const size = parseFloat(fill.fillSz);
+        const price = parseFloat(fill.fillPx);
+        totalCloseSize += size;
+        totalCloseValue += size * price;
+      }
+      actualExitPrice = totalCloseSize > 0 ? totalCloseValue / totalCloseSize : undefined;
+    }
+
+    // 计算时间
+    const entryTime = new Date(parseInt(firstFill.ts));
+    const exitTime = closeFills.length > 0 ? new Date(parseInt(lastFill.ts)) : undefined;
+    const duration = exitTime ? Math.round((exitTime.getTime() - entryTime.getTime()) / (1000 * 60)) : undefined;
+
+    // 计算手续费和PNL
+    let totalFees = 0;
+    for (const fill of fills) {
+      if (fill.fee) {
+        totalFees += Math.abs(parseFloat(fill.fee));
+      }
+    }
+
+    // 计算 PNL（对于成交明细，需要手动计算）
+    let totalPnl = 0;
+    if (actualExitPrice && actualEntryPrice && totalOpenSize > 0) {
+      if (direction === 'LONG') {
+        totalPnl = (actualExitPrice - actualEntryPrice) * totalOpenSize;
+      } else {
+        totalPnl = (actualEntryPrice - actualExitPrice) * totalOpenSize;
+      }
+    }
+
+    // 计算其他指标
+    const positionSize = totalOpenSize;
+    const leverage = 1; // 成交明细中没有杠杆信息，设为默认值
+    const margin = actualEntryPrice > 0 ? (positionSize * actualEntryPrice) / leverage : 0;
+    const netPnl = totalPnl - totalFees;
+    const rorPercentage = margin > 0 ? (netPnl / margin) * 100 : 0;
+
+    // 生成交易ID
+    const tradeId = this.generateTradeId(instrument, direction, entryTime);
+
+    const processedTrade: ProcessedTradeData = {
+      tradeId,
+      instrument,
+      direction,
+      status,
+      leverage,
+      entryTime,
+      exitTime,
+      duration,
+      actualEntryPrice,
+      actualExitPrice,
+      positionSize,
+      margin,
+      pnl: totalPnl,
+      rorPercentage,
+      fees: totalFees,
+      netPnl,
+      initialTakeProfit: undefined, // 成交明细中没有止盈止损信息
+      initialStopLoss: undefined,
+      hitTakeProfit: false,
+      hitStopLoss: false,
+      okxOrderIds: [...new Set(fills.map(f => f.ordId))], // 去重的订单ID列表
+      rawData: fills,
+      notes: `从 OKX 成交明细同步的交易记录，包含 ${fills.length} 个成交明细`,
+    };
+
+    this.logger.debug(`处理成交明细交易记录: ${tradeId}, PNL: $${totalPnl.toFixed(2)}`);
+    
+    return processedTrade;
+  }
+
+  /**
+   * 按交易对和持仓方向分组订单（改进版：基于仓位变化逻辑）
    */
   private groupOrdersByTrade(orders: OkxOrderData[]): Map<string, OkxOrderData[]> {
     const groups = new Map<string, OkxOrderData[]>();
 
-    for (const order of orders) {
-      // 只处理已成交的订单
-      if (order.state !== 'filled') {
-        continue;
-      }
+    // 按时间排序
+    const sortedOrders = orders
+      .filter(order => order.state === 'filled')
+      .sort((a, b) => parseInt(a.fillTime) - parseInt(b.fillTime));
 
-      // 生成交易组键：交易对 + 持仓方向 + 大致时间窗口
-      const timeWindow = this.getTimeWindow(order.fillTime);
-      const tradeKey = `${order.instId}_${order.posSide}_${timeWindow}`;
-
-      if (!groups.has(tradeKey)) {
-        groups.set(tradeKey, []);
+    // 按交易对和方向分组
+    const instrumentGroups = new Map<string, OkxOrderData[]>();
+    
+    for (const order of sortedOrders) {
+      const instrumentKey = `${order.instId}_${order.posSide}`;
+      if (!instrumentGroups.has(instrumentKey)) {
+        instrumentGroups.set(instrumentKey, []);
       }
-      groups.get(tradeKey)!.push(order);
+      instrumentGroups.get(instrumentKey)!.push(order);
+    }
+
+    // 对每个交易对+方向组合进行智能分组
+    for (const [instrumentKey, instrumentOrders] of instrumentGroups.entries()) {
+      const tradeGroups = this.smartGroupByPosition(instrumentOrders);
+      
+      // 将分组结果添加到总结果中
+      tradeGroups.forEach((group, index) => {
+        const groupKey = `${instrumentKey}_${index}`;
+        groups.set(groupKey, group);
+      });
     }
 
     return groups;
+  }
+
+  /**
+   * 基于仓位逻辑的智能分组
+   */
+  private smartGroupByPosition(orders: OkxOrderData[]): OkxOrderData[][] {
+    const tradeGroups: OkxOrderData[][] = [];
+    let currentGroup: OkxOrderData[] = [];
+    let currentPosition = 0; // 当前净仓位
+    
+    this.logger.debug(`开始分组 ${orders.length} 个订单，交易对: ${orders[0]?.instId}, 方向: ${orders[0]?.posSide}`);
+    
+    for (const order of orders) {
+      const orderSize = parseFloat(order.accFillSz);
+      const isOpeningOrder = this.isOpeningOrder(order);
+      
+      this.logger.debug(`订单: ${order.side} ${orderSize}, 开仓: ${isOpeningOrder}, 当前仓位: ${currentPosition}`);
+      
+      if (isOpeningOrder) {
+        // 开仓订单
+        if (currentPosition === 0 && currentGroup.length > 0) {
+          // 新交易开始，保存之前的交易
+          tradeGroups.push([...currentGroup]);
+          currentGroup = [];
+        }
+        currentGroup.push(order);
+        currentPosition += orderSize;
+      } else {
+        // 平仓订单
+        if (currentGroup.length > 0) {
+          currentGroup.push(order);
+          currentPosition -= orderSize;
+          
+          // 如果仓位接近于0，说明这笔交易完成
+          if (Math.abs(currentPosition) < 0.0001) {
+            tradeGroups.push([...currentGroup]);
+            this.logger.debug(`完成一笔交易，包含 ${currentGroup.length} 个订单`);
+            currentGroup = [];
+            currentPosition = 0;
+          }
+        }
+      }
+    }
+    
+    // 处理未完成的交易（持仓中）
+    if (currentGroup.length > 0) {
+      this.logger.debug(`添加未完成交易，包含 ${currentGroup.length} 个订单`);
+      tradeGroups.push(currentGroup);
+    }
+    
+    this.logger.debug(`分组完成，总共 ${tradeGroups.length} 笔交易`);
+    return tradeGroups;
+  }
+
+  /**
+   * 判断是否为开仓订单
+   */
+  private isOpeningOrder(order: OkxOrderData): boolean {
+    // 对于永续合约的仓位逻辑：
+    // long 方向：buy = 开多仓, sell = 平多仓
+    // short 方向：sell = 开空仓, buy = 平空仓
+    
+    if (order.posSide === 'long') {
+      return order.side === 'buy'; // 买入 = 开多仓
+    } else if (order.posSide === 'short') {
+      return order.side === 'sell'; // 卖出 = 开空仓
+    }
+    
+    return true; // 默认当作开仓
   }
 
   /**
@@ -278,5 +669,25 @@ export class TradeProcessorService {
       valid: errors.length === 0,
       errors
     };
+  }
+
+  /**
+   * 将订单方向映射到交易方向
+   */
+  private mapOrderSideToDirection(side: string, posSide: string): 'LONG' | 'SHORT' {
+    // 对于永续合约：
+    // - 开多仓：side=buy, posSide=long
+    // - 平多仓：side=sell, posSide=long
+    // - 开空仓：side=sell, posSide=short  
+    // - 平空仓：side=buy, posSide=short
+    
+    if (posSide === 'long') {
+      return 'LONG';
+    } else if (posSide === 'short') {
+      return 'SHORT';
+    }
+    
+    // 如果没有持仓方向信息，根据买卖方向判断
+    return side === 'buy' ? 'LONG' : 'SHORT';
   }
 } 

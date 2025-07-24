@@ -24,10 +24,10 @@ export class NotionSyncService {
   ) {}
 
   /**
-   * 同步未同步的交易记录到 Notion
+   * 智能增量同步：对比数据库和 Notion，只同步差异记录
    */
   async syncUnsyncedTrades(): Promise<SyncToNotionResult> {
-    this.logger.log('开始同步未同步的交易记录到 Notion');
+    this.logger.log('开始智能增量同步交易记录到 Notion');
 
     const result: SyncToNotionResult = {
       success: false,
@@ -51,36 +51,43 @@ export class NotionSyncService {
         return result;
       }
 
-      // 3. 获取未同步的交易记录
-      const unsyncedTrades = await this.tradingHistoryService.getUnsyncedRecords();
-      if (unsyncedTrades.length === 0) {
-        this.logger.log('没有需要同步的交易记录');
+      // 3. 获取所有数据库交易记录
+      const allDbTradesResult = await this.tradingHistoryService.findAll({ limit: 1000 }); // 最多获取1000条
+      const allDbTrades = allDbTradesResult.data;
+      if (allDbTrades.length === 0) {
+        this.logger.log('数据库中没有交易记录');
         result.success = true;
         return result;
       }
 
-      this.logger.log(`找到 ${unsyncedTrades.length} 笔未同步的交易记录`);
+      this.logger.log(`数据库中找到 ${allDbTrades.length} 笔交易记录`);
 
-      // 4. 逐一同步到 Notion
-      for (const trade of unsyncedTrades) {
+      // 4. 获取 Notion 中现有的交易记录
+      const existingNotionTrades = await this.getAllNotionTrades();
+      this.logger.log(`Notion 中找到 ${existingNotionTrades.length} 笔交易记录`);
+
+      // 5. 对比差异，找出需要同步的记录
+      const tradesToSync = allDbTrades.filter(dbTrade => 
+        !existingNotionTrades.includes(dbTrade.tradeId)
+      );
+
+      if (tradesToSync.length === 0) {
+        this.logger.log('所有交易记录都已同步到 Notion');
+        result.success = true;
+        return result;
+      }
+
+      this.logger.log(`需要同步 ${tradesToSync.length} 笔新交易记录到 Notion`);
+
+      // 6. 批量同步差异记录
+      for (const trade of tradesToSync) {
         try {
           const pageData = this.convertTradeToNotionData(trade);
           
-          // 检查是否已存在页面
-          const existingPage = await this.notionApiService.queryPageByTradeId(trade.tradeId);
-          
-          let notionPage;
-          if (existingPage) {
-            // 更新现有页面
-            notionPage = await this.notionApiService.updateTradePage(existingPage.pageId, pageData);
-            result.updatedCount++;
-            this.logger.debug(`更新 Notion 页面: ${trade.tradeId}`);
-          } else {
-            // 创建新页面
-            notionPage = await this.notionApiService.createTradePage(pageData);
-            result.syncedCount++;
-            this.logger.debug(`创建 Notion 页面: ${trade.tradeId}`);
-          }
+          // 创建新页面（因为已确认不存在）
+          const notionPage = await this.notionApiService.createTradePage(pageData);
+          result.syncedCount++;
+          this.logger.debug(`创建 Notion 页面: ${trade.tradeId}`);
 
           // 标记为已同步
           await this.tradingHistoryService.markAsSynced(trade.id, notionPage.pageId);
@@ -97,17 +104,64 @@ export class NotionSyncService {
         }
       }
 
-      result.success = result.errors.length === 0 || (result.syncedCount + result.updatedCount) > 0;
+      result.success = result.errors.length === 0 || result.syncedCount > 0;
 
       this.logger.log(
-        `Notion 同步完成: 新建 ${result.syncedCount} 页面，更新 ${result.updatedCount} 页面`
+        `增量同步完成: 新建 ${result.syncedCount} 页面，跳过 ${existingNotionTrades.length} 个已存在记录`
       );
 
       return result;
     } catch (error: any) {
-      this.logger.error('同步到 Notion 失败:', error);
+      this.logger.error('增量同步到 Notion 失败:', error);
       result.errors.push(error.message);
       return result;
+    }
+  }
+
+  /**
+   * 获取 Notion 中所有现有的交易ID
+   */
+  private async getAllNotionTrades(): Promise<string[]> {
+    const tradeIds: string[] = [];
+    
+    try {
+      const notion = (this.notionApiService as any).notion;
+      if (!notion) {
+        throw new Error('Notion 客户端未初始化');
+      }
+
+      const config = (this.notionApiService as any).config;
+      let cursor: string | undefined;
+      let hasMore = true;
+
+      // 分页获取所有记录
+      while (hasMore) {
+        const response = await notion.databases.query({
+          database_id: config.databaseId,
+          start_cursor: cursor,
+          page_size: 100, // 每页最多100条
+        });
+
+        for (const page of response.results) {
+          const properties = (page as any).properties;
+          const tradeIdProperty = properties['Trade ID'];
+          
+          if (tradeIdProperty && tradeIdProperty.title && tradeIdProperty.title[0]) {
+            const tradeId = tradeIdProperty.title[0].text.content;
+            tradeIds.push(tradeId);
+          }
+        }
+
+        hasMore = response.has_more;
+        cursor = response.next_cursor || undefined;
+      }
+
+      this.logger.debug(`从 Notion 获取到 ${tradeIds.length} 个交易ID`);
+      return tradeIds;
+
+    } catch (error: any) {
+      this.logger.error('获取 Notion 交易记录失败:', error);
+      return []; // 返回空数组，会导致全量同步
     }
   }
 

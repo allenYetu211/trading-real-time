@@ -1707,7 +1707,7 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
       // 解析同步参数
       const limit = args.length > 0 ? parseInt(args[0]) || 20 : 20;
       
-      await this.sendCommandMessage(chatId, `🔄 正在同步最近 ${limit} 笔 OKX 交易数据...\n\n⏳ 这可能需要几秒钟时间`);
+      await this.sendCommandMessage(chatId, `🔄 正在同步最近 ${limit} 笔 OKX 交易数据...\n\n⏳ 使用简化模式，直接获取已完成的交易记录`);
 
       // 检查 OKX 配置状态
       const status = await this.okxSyncService.checkStatus();
@@ -1740,72 +1740,39 @@ OKX_PASSPHRASE=your_passphrase</code>
         return;
       }
 
-      // 执行同步
-      const syncResult = await this.okxSyncService.quickSync(limit);
+      // 执行简化同步
+      const syncResult = await this.okxSyncService.syncCompletedTrades({ limit });
 
       if (syncResult.success) {
-        const message = `
-✅ <b>OKX 数据同步完成</b>
-
-📊 <b>同步结果：</b>
-• 处理订单: ${syncResult.processedCount} 笔
-• 新增交易: ${syncResult.createdCount} 笔
-• 更新交易: ${syncResult.updatedCount} 笔
-
-${syncResult.trades.length > 0 ? `
-📝 <b>新同步的交易：</b>
-${syncResult.trades.slice(0, 3).map(trade => 
-  `• ${trade.instrument} ${trade.direction} - $${trade.pnl?.toFixed(2) || '0.00'}`
-).join('\n')}${syncResult.trades.length > 3 ? `\n• ... 还有 ${syncResult.trades.length - 3} 笔交易` : ''}
-` : ''}
-
-💡 使用 <code>/okx_trades</code> 查看完整交易记录
-`.trim();
-
-        await this.sendCommandMessage(chatId, message);
-      } else {
-        // 区分跳过的交易和真正的错误
-        const skippedTrades = syncResult.errors.filter(err => err.includes('跳过交易'));
-        const realErrors = syncResult.errors.filter(err => !err.includes('跳过交易'));
+        let message = `✅ <b>同步完成</b>\n\n`;
+        message += `📊 <b>同步结果：</b>\n`;
+        message += `• 处理总数: ${syncResult.processedCount} 笔\n`;
+        message += `• 新增记录: ${syncResult.createdCount} 笔\n`;
+        message += `• 更新记录: ${syncResult.updatedCount} 笔\n`;
         
-        let message = '';
-        
-        if (syncResult.createdCount > 0 || syncResult.updatedCount > 0) {
-          // 有成功的交易，但也有跳过的
-          message = `
-⚠️ <b>同步部分完成</b>
-
-📊 <b>同步结果：</b>
-• 新增交易: ${syncResult.createdCount} 笔
-• 更新交易: ${syncResult.updatedCount} 笔
-• 跳过交易: ${skippedTrades.length} 笔
-
-${skippedTrades.length > 0 ? `
-📝 <b>跳过的交易（数据不完整）：</b>
-${skippedTrades.slice(0, 3).map(err => `• ${err.replace('跳过交易 ', '')}`).join('\n')}${skippedTrades.length > 3 ? `\n• ... 还有 ${skippedTrades.length - 3} 笔` : ''}
-` : ''}
-
-💡 跳过的交易通常是因为价格数据不完整，这在 OKX 历史数据中是正常现象。
-`.trim();
-        } else {
-          // 没有成功的交易
-          const errorMessage = realErrors.length > 0 ? realErrors.join('\n• ') : '数据验证失败';
-          message = `
-❌ <b>同步失败</b>
-
-${realErrors.length > 0 ? `• ${errorMessage}\n\n` : ''}${skippedTrades.length > 0 ? `跳过了 ${skippedTrades.length} 笔数据不完整的交易。\n\n` : ''}💡 <b>可能的解决方案：</b>
-• 尝试同步更多数量的记录
-• 检查网络连接和 API 权限
-• 稍后重试同步
-`.trim();
+        if (syncResult.errors.length > 0) {
+          message += `• 错误数量: ${syncResult.errors.length} 笔\n`;
         }
 
+        if (syncResult.trades.length > 0) {
+          message += `\n📈 <b>示例交易：</b>\n`;
+          const sampleTrade = syncResult.trades[0];
+          message += `• ${sampleTrade.instrument} ${sampleTrade.direction}\n`;
+          message += `• 价格: $${sampleTrade.actualEntryPrice}\n`;
+          message += `• 数量: ${sampleTrade.positionSize}\n`;
+          message += `• 盈亏: $${sampleTrade.pnl}\n`;
+        }
+
+        message += `\n💡 现在数据更准确，直接使用已完成的交易记录`;
+        
         await this.sendCommandMessage(chatId, message);
+      } else {
+        await this.sendCommandMessage(chatId, `❌ <b>同步失败</b>\n\n${syncResult.errors.join('\n')}`);
       }
 
-    } catch (error: any) {
-      this.logger.error('同步交易数据失败:', error);
-      await this.sendCommandMessage(chatId, `❌ 同步失败: ${error.message}`);
+    } catch (error) {
+      this.logger.error('处理 OKX 同步命令失败:', error);
+      await this.sendCommandMessage(chatId, `❌ 同步过程中发生错误: ${error.message}`);
     }
   }
 
@@ -2109,5 +2076,42 @@ ${this.getPerformanceSuggestions(stats)}
     };
 
     return intervalMap[interval] || null;
+  }
+
+  /**
+   * 重新初始化菜单
+   */
+  async reinitializeMenus(): Promise<{ commands: any[] | null; menuButtonSet: boolean }> {
+    this.logger.log('🔄 开始重新初始化 Telegram 菜单...');
+
+    if (!this.bot) {
+      throw new Error('Telegram Bot 未初始化');
+    }
+
+    try {
+      // 重新设置菜单
+      await this.initializeMenus();
+      
+      // 获取设置后的命令列表确认
+      const commands = await this.getBotCommands();
+      
+      // 发送确认消息
+      await this.sendNotification({
+        title: '✅ 菜单重新初始化完成',
+        message: `Telegram 菜单已重新设置\n\n当前可用命令: ${commands?.length || 0} 个\n\n请尝试：\n• 点击输入框旁边的菜单按钮\n• 发送 /help 查看帮助\n• 发送 /menu 使用快捷面板`,
+        type: 'success',
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.log('✅ Telegram 菜单重新初始化完成');
+      
+      return {
+        commands,
+        menuButtonSet: true,
+      };
+    } catch (error) {
+      this.logger.error('❌ 重新初始化菜单失败:', error);
+      throw error;
+    }
   }
 }
