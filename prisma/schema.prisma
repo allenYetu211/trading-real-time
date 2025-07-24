@@ -188,3 +188,62 @@ model NotificationRecord {
   @@index([timestamp])
   @@map("notification_records")
 }
+
+// 交易记录表
+model TradingRecord {
+  id                   Int      @id @default(autoincrement())
+  tradeId              String   @unique @db.VarChar(100) @map("trade_id") // 唯一交易ID
+  
+  // 基础信息
+  instrument           String   @db.VarChar(20) // 交易对
+  direction            String   @db.VarChar(10) // LONG/SHORT
+  status               String   @db.VarChar(20) // OPEN/CLOSED
+  leverage             Decimal? @db.Decimal(5, 2) // 杠杆
+  
+  // 时间信息
+  entryTime            DateTime? @map("entry_time") // 开仓时间
+  exitTime             DateTime? @map("exit_time") // 平仓时间
+  duration             Int? // 持仓时长(分钟)
+  
+  // 价格信息
+  plannedPrice         Decimal? @db.Decimal(30, 8) @map("planned_price") // 计划入场价
+  actualEntryPrice     Decimal? @db.Decimal(30, 8) @map("actual_entry_price") // 实际开仓均价
+  actualExitPrice      Decimal? @db.Decimal(30, 8) @map("actual_exit_price") // 实际平仓均价
+  positionSize         Decimal? @db.Decimal(30, 8) @map("position_size") // 头寸规模
+  margin               Decimal? @db.Decimal(30, 8) // 保证金(USD)
+  
+  // 盈亏信息
+  pnl                  Decimal? @db.Decimal(30, 8) // 盈亏(USD)
+  rorPercentage        Decimal? @db.Decimal(8, 4) @map("ror_percentage") // 盈亏率(%)
+  fees                 Decimal? @db.Decimal(30, 8) // 手续费(USD)
+  netPnl               Decimal? @db.Decimal(30, 8) @map("net_pnl") // 净盈亏(USD)
+  slippage             Decimal? @db.Decimal(30, 8) // 滑点(USD)
+  
+  // 风控信息
+  initialTakeProfit    Decimal? @db.Decimal(30, 8) @map("initial_take_profit") // 初始止盈位
+  initialStopLoss      Decimal? @db.Decimal(30, 8) @map("initial_stop_loss") // 初始止损位
+  hitTakeProfit        Boolean  @default(false) @map("hit_take_profit") // 是否触及止盈
+  hitStopLoss          Boolean  @default(false) @map("hit_stop_loss") // 是否触及止损
+  
+  // 高级指标
+  maxFavorableExcursion    Decimal? @db.Decimal(30, 8) @map("max_favorable_excursion") // 最大有利偏移
+  maxAdverseExcursion      Decimal? @db.Decimal(30, 8) @map("max_adverse_excursion") // 最大不利偏移
+  
+  // 同步状态
+  notionSynced         Boolean  @default(false) @map("notion_synced") // 是否已同步到Notion
+  notionPageId         String?  @db.VarChar(100) @map("notion_page_id") // Notion页面ID
+  syncedAt             DateTime? @map("synced_at") // 同步时间
+  
+  // 元数据
+  okxOrderIds          String?  @db.Text @map("okx_order_ids") // OKX订单ID列表(JSON)
+  rawData              String?  @db.Text @map("raw_data") // 原始数据(JSON)
+  notes                String?  @db.Text // 备注
+  
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@index([instrument, status, createdAt])
+  @@index([status, notionSynced])
+  @@index([entryTime, exitTime])
+  @@map("trading_records")
+}

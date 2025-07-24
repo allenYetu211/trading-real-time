@@ -5,6 +5,9 @@ import { NotificationData, AnalysisNotification } from '../notification.service'
 import { CoinConfigService } from '../../coin-config/coin-config.service';
 import { AnalysisService } from '../../analysis/analysis.service';
 import { DataService } from '../../data/data.service';
+import { TradingHistoryService } from '../../trading-history/trading-history.service';
+import { OkxSyncService } from '../../okx-integration/services/okx-sync.service';
+import { NotionSyncService } from '../../notion-integration/services/notion-sync.service';
 import { IntervalType } from 'src/shared/enums';
 
 export interface TelegramConfig {
@@ -42,6 +45,12 @@ export class TelegramService {
     private readonly analysisService: AnalysisService,
     @Inject(forwardRef(() => DataService))
     private readonly dataService: DataService,
+    @Inject(forwardRef(() => TradingHistoryService))
+    private readonly tradingHistoryService: TradingHistoryService,
+    @Inject(forwardRef(() => OkxSyncService))
+    private readonly okxSyncService: OkxSyncService,
+    @Inject(forwardRef(() => NotionSyncService))
+    private readonly notionSyncService: NotionSyncService,
   ) {
     this.config = this.configService.get<TelegramConfig>('telegram')!;
     this.initializeBot();
@@ -802,6 +811,31 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
         await this.handleMenuCommand(chatId);
         break;
 
+      // OKX 交易复盘命令
+      case '/okx_trades':
+        await this.handleOkxTradesCommand(chatId, args);
+        break;
+
+      case '/okx_stats':
+        await this.handleOkxStatsCommand(chatId, args);
+        break;
+
+      case '/okx_sync':
+        await this.handleOkxSyncCommand(chatId, args);
+        break;
+
+      case '/okx_report':
+        await this.handleOkxReportCommand(chatId, args);
+        break;
+
+      case '/okx_unsynced':
+        await this.handleOkxUnsyncedCommand(chatId);
+        break;
+
+      case '/okx_performance':
+        await this.handleOkxPerformanceCommand(chatId, args);
+        break;
+
       default:
         await this.sendCommandMessage(chatId, `❌ 未知命令: ${command}\n\n发送 /help 查看可用命令`);
         break;
@@ -859,7 +893,7 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
     const helpMessage = `
 🤖 <b>交易系统 Telegram Bot 帮助</b>
 
-📋 <b>可用命令:</b>
+📋 <b>技术分析命令:</b>
 
 /help - 显示此帮助信息
 /list - 查看当前监控的交易对
@@ -867,28 +901,27 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
 /remove [交易对] - 删除监控交易对（全周期）
 /analyze [交易对] - 立即分析交易对（全周期）
 
-✨ <b>交互式操作:</b>
+📊 <b>OKX 交易复盘命令:</b>
 
-• <code>/add</code> - 进入添加模式，然后输入交易对名称
-• <code>/remove</code> - 显示监控列表，点击删除
-• <code>/analyze</code> - 显示监控列表，点击分析
+/okx_trades [数量] - 查看交易记录列表
+/okx_stats - 查看交易统计数据
+/okx_sync [数量] - 同步最新交易数据
+/okx_report - 同步交易记录到 Notion
+/okx_unsynced - 查看未同步记录
+/okx_performance - 查看交易表现分析
 
-📝 <b>使用示例:</b>
+✨ <b>使用示例:</b>
 
-<code>/add BTCUSDT</code> - 直接添加 BTC 全周期监控
-<code>/add</code> ➜ <code>BTCUSDT</code> - 交互式添加
-<code>/remove</code> ➜ 点击删除按钮
-<code>/analyze</code> ➜ 点击分析按钮
-
-⏱️ <b>监控周期:</b>
-系统将对每个交易对监控以下4个周期：
-• 5分钟 (5m) • 15分钟 (15m) • 1小时 (1h) • 4小时 (4h)
+<code>/okx_trades</code> - 查看最近10笔交易
+<code>/okx_trades 20</code> - 查看最近20笔交易
+<code>/okx_sync 20</code> - 同步最近20笔OKX交易
+<code>/okx_stats</code> - 查看胜率、盈亏等统计
+<code>/okx_performance</code> - 深度表现分析
 
 💡 <b>提示:</b>
-• 支持传统命令和交互式操作两种方式
-• 一个命令操作所有4个周期
-• 交易对名称不区分大小写
-• 系统会自动发送多周期综合分析通知
+• 所有 okx_ 开头的命令都是交易复盘相关
+• 支持快速触发，方便日常使用
+• 数据自动计算，无需手动统计
 • 使用 /menu 命令获取快捷操作面板
 `.trim();
 
@@ -1280,6 +1313,13 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
       { command: 'add', description: '添加全周期监控交易对' },
       { command: 'remove', description: '删除全周期监控交易对' },
       { command: 'analyze', description: '立即分析指定交易对(全周期)' },
+      // OKX 交易复盘相关命令
+      { command: 'okx_trades', description: '查看交易记录列表' },
+      { command: 'okx_stats', description: '查看交易统计数据' },
+      { command: 'okx_sync', description: '同步最新交易数据' },
+      { command: 'okx_report', description: '同步交易记录到 Notion' },
+      { command: 'okx_unsynced', description: '查看未同步记录' },
+      { command: 'okx_performance', description: '查看交易表现分析' },
     ];
 
     try {
@@ -1562,6 +1602,484 @@ ${signalEmoji[dominantSignal]} <b>${this.escapeHtml(symbol)}</b>
       this.logger.error('显示交互式分析列表失败:', error);
       await this.sendCommandMessage(chatId, '❌ 获取监控列表失败，请稍后重试');
     }
+  }
+
+  // ==================== OKX 交易复盘命令处理方法 ====================
+
+  /**
+   * 处理查看交易记录命令
+   */
+  private async handleOkxTradesCommand(chatId: number, args: string[]): Promise<void> {
+    try {
+      await this.sendCommandMessage(chatId, '🔄 正在获取交易记录...');
+
+      const limit = args.length > 0 ? parseInt(args[0]) || 10 : 10;
+      const queryResult = await this.tradingHistoryService.findAll({
+        page: 1,
+        limit: Math.min(limit, 20), // 最多显示20条
+        sortBy: 'createdAt',
+        sortOrder: 'DESC'
+      });
+
+      if (queryResult.data.length === 0) {
+        await this.sendCommandMessage(chatId, '📝 <b>交易记录</b>\n\n暂无交易记录');
+        return;
+      }
+
+      let message = `📊 <b>最近 ${queryResult.data.length} 笔交易记录</b>\n\n`;
+
+      for (const record of queryResult.data) {
+        const statusIcon = record.status === 'CLOSED' ? '✅' : '🟡';
+        const directionIcon = record.direction === 'LONG' ? '🟢' : '🔴';
+        const pnlIcon = (record.pnl && Number(record.pnl) > 0) ? '💰' : '📉';
+        
+        message += `${statusIcon} <b>${record.instrument}</b> ${directionIcon}\n`;
+        message += `🏷️ ID: <code>${record.tradeId}</code>\n`;
+        
+        if (record.actualEntryPrice) {
+          message += `📈 开仓: $${Number(record.actualEntryPrice).toFixed(4)}\n`;
+        }
+        if (record.actualExitPrice) {
+          message += `📉 平仓: $${Number(record.actualExitPrice).toFixed(4)}\n`;
+        }
+        if (record.pnl) {
+          message += `${pnlIcon} PNL: $${Number(record.pnl).toFixed(2)}\n`;
+        }
+        if (record.entryTime) {
+          message += `⏰ ${new Date(record.entryTime).toLocaleString('zh-CN')}\n`;
+        }
+        message += '\n';
+      }
+
+      message += `📄 总计: ${queryResult.pagination.total} 笔交易\n`;
+      message += `💡 使用 <code>/okx_trades 20</code> 查看更多记录`;
+
+      await this.sendCommandMessage(chatId, message);
+
+    } catch (error) {
+      this.logger.error('查看交易记录失败:', error);
+      await this.sendCommandMessage(chatId, `❌ 获取交易记录失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 处理查看交易统计命令
+   */
+  private async handleOkxStatsCommand(chatId: number, args: string[]): Promise<void> {
+    try {
+      await this.sendCommandMessage(chatId, '📊 正在计算交易统计...');
+
+      const stats = await this.tradingHistoryService.getStatistics({});
+
+      const message = `
+📊 <b>交易统计报告</b>
+
+📈 <b>基础数据</b>
+• 总交易数: ${stats.totalTrades}
+• 已完成: ${stats.completedTrades}
+• 进行中: ${stats.openTrades}
+
+💰 <b>盈亏分析</b>
+• 盈利交易: ${stats.profitableTrades}
+• 亏损交易: ${stats.losingTrades}
+• 胜率: ${stats.winRate}%
+
+💵 <b>资金分析</b>
+• 总盈亏: $${Number(stats.totalPnl).toFixed(2)}
+• 总手续费: $${Number(stats.totalFees).toFixed(2)}
+• 净盈亏: $${Number(stats.netPnl).toFixed(2)}
+• 平均盈亏: $${Number(stats.averagePnl).toFixed(2)}
+`.trim();
+
+      await this.sendCommandMessage(chatId, message);
+
+    } catch (error) {
+      this.logger.error('获取交易统计失败:', error);
+      await this.sendCommandMessage(chatId, `❌ 获取统计数据失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 处理同步交易数据命令
+   */
+  private async handleOkxSyncCommand(chatId: number, args: string[] = []): Promise<void> {
+    try {
+      // 解析同步参数
+      const limit = args.length > 0 ? parseInt(args[0]) || 20 : 20;
+      
+      await this.sendCommandMessage(chatId, `🔄 正在同步最近 ${limit} 笔 OKX 交易数据...\n\n⏳ 这可能需要几秒钟时间`);
+
+      // 检查 OKX 配置状态
+      const status = await this.okxSyncService.checkStatus();
+      
+      if (!status.configured) {
+        const message = `
+❌ <b>OKX API 未配置</b>
+
+请先在 .env 文件中配置 OKX API 密钥：
+
+<code>OKX_API_KEY=your_api_key
+OKX_SECRET_KEY=your_secret_key  
+OKX_PASSPHRASE=your_passphrase</code>
+
+💡 <b>获取 API 密钥：</b>
+1. 登录 OKX 官网
+2. 进入账户设置 → API 管理
+3. 创建新的 API 密钥
+4. 设置权限：只读（Read）
+
+配置完成后重启应用即可使用同步功能。
+`.trim();
+        
+        await this.sendCommandMessage(chatId, message);
+        return;
+      }
+
+      if (!status.connected) {
+        await this.sendCommandMessage(chatId, `❌ <b>OKX API 连接失败</b>\n\n${status.message}\n\n请检查 API 密钥配置是否正确。`);
+        return;
+      }
+
+      // 执行同步
+      const syncResult = await this.okxSyncService.quickSync(limit);
+
+      if (syncResult.success) {
+        const message = `
+✅ <b>OKX 数据同步完成</b>
+
+📊 <b>同步结果：</b>
+• 处理订单: ${syncResult.processedCount} 笔
+• 新增交易: ${syncResult.createdCount} 笔
+• 更新交易: ${syncResult.updatedCount} 笔
+
+${syncResult.trades.length > 0 ? `
+📝 <b>新同步的交易：</b>
+${syncResult.trades.slice(0, 3).map(trade => 
+  `• ${trade.instrument} ${trade.direction} - $${trade.pnl?.toFixed(2) || '0.00'}`
+).join('\n')}${syncResult.trades.length > 3 ? `\n• ... 还有 ${syncResult.trades.length - 3} 笔交易` : ''}
+` : ''}
+
+💡 使用 <code>/okx_trades</code> 查看完整交易记录
+`.trim();
+
+        await this.sendCommandMessage(chatId, message);
+      } else {
+        // 区分跳过的交易和真正的错误
+        const skippedTrades = syncResult.errors.filter(err => err.includes('跳过交易'));
+        const realErrors = syncResult.errors.filter(err => !err.includes('跳过交易'));
+        
+        let message = '';
+        
+        if (syncResult.createdCount > 0 || syncResult.updatedCount > 0) {
+          // 有成功的交易，但也有跳过的
+          message = `
+⚠️ <b>同步部分完成</b>
+
+📊 <b>同步结果：</b>
+• 新增交易: ${syncResult.createdCount} 笔
+• 更新交易: ${syncResult.updatedCount} 笔
+• 跳过交易: ${skippedTrades.length} 笔
+
+${skippedTrades.length > 0 ? `
+📝 <b>跳过的交易（数据不完整）：</b>
+${skippedTrades.slice(0, 3).map(err => `• ${err.replace('跳过交易 ', '')}`).join('\n')}${skippedTrades.length > 3 ? `\n• ... 还有 ${skippedTrades.length - 3} 笔` : ''}
+` : ''}
+
+💡 跳过的交易通常是因为价格数据不完整，这在 OKX 历史数据中是正常现象。
+`.trim();
+        } else {
+          // 没有成功的交易
+          const errorMessage = realErrors.length > 0 ? realErrors.join('\n• ') : '数据验证失败';
+          message = `
+❌ <b>同步失败</b>
+
+${realErrors.length > 0 ? `• ${errorMessage}\n\n` : ''}${skippedTrades.length > 0 ? `跳过了 ${skippedTrades.length} 笔数据不完整的交易。\n\n` : ''}💡 <b>可能的解决方案：</b>
+• 尝试同步更多数量的记录
+• 检查网络连接和 API 权限
+• 稍后重试同步
+`.trim();
+        }
+
+        await this.sendCommandMessage(chatId, message);
+      }
+
+    } catch (error: any) {
+      this.logger.error('同步交易数据失败:', error);
+      await this.sendCommandMessage(chatId, `❌ 同步失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 处理生成交易报告命令
+   */
+  private async handleOkxReportCommand(chatId: number, args: string[]): Promise<void> {
+    try {
+      await this.sendCommandMessage(chatId, '📄 正在同步交易记录到 Notion...');
+
+      // 检查 Notion 配置
+      const notionStatus = await this.notionSyncService.checkStatus();
+      if (!notionStatus.configured) {
+        const message = `
+❌ <b>Notion 未配置</b>
+
+⚙️ <b>需要配置的环境变量：</b>
+• NOTION_API_TOKEN - Notion 集成令牌
+• NOTION_DATABASE_ID - 数据库 ID  
+• NOTION_ENABLED=true - 启用 Notion
+
+📚 <b>配置步骤：</b>
+1. 在 Notion 中创建集成应用
+2. 创建或选择交易记录数据库
+3. 配置环境变量并重启应用
+4. 使用 /okx_report 同步数据
+
+💡 详细配置指南请查看项目文档
+`.trim();
+        await this.sendCommandMessage(chatId, message);
+        return;
+      }
+
+      if (!notionStatus.connected) {
+        const message = `
+❌ <b>Notion 连接失败</b>
+
+🔍 <b>错误信息：</b>
+${notionStatus.message}
+
+💡 <b>可能的解决方案：</b>
+• 检查 API 令牌是否有效
+• 确认数据库 ID 正确
+• 验证集成权限设置
+• 检查网络连接
+`.trim();
+        await this.sendCommandMessage(chatId, message);
+        return;
+      }
+
+      // 同步未同步的交易记录
+      const syncResult = await this.notionSyncService.syncUnsyncedTrades();
+
+      if (syncResult.success) {
+        let message = '';
+        
+        if (syncResult.syncedCount === 0 && syncResult.updatedCount === 0) {
+          message = `
+✅ <b>Notion 同步完成</b>
+
+📋 <b>同步结果：</b>
+• 所有交易记录都已是最新状态
+• 无需同步的记录
+
+💡 使用 /okx_trades 查看记录详情
+`.trim();
+        } else {
+          const notionPagesList = syncResult.notionPages.slice(0, 3).map(page => 
+            `• <a href="${page.url}">${page.tradeId}</a>`
+          ).join('\n');
+          
+          message = `
+✅ <b>Notion 同步成功完成</b>
+
+📊 <b>同步结果：</b>
+• 新建页面: ${syncResult.syncedCount} 个
+• 更新页面: ${syncResult.updatedCount} 个
+• 总计处理: ${syncResult.syncedCount + syncResult.updatedCount} 笔交易
+
+${syncResult.notionPages.length > 0 ? `
+🔗 <b>Notion 页面链接：</b>
+${notionPagesList}${syncResult.notionPages.length > 3 ? `\n• ... 还有 ${syncResult.notionPages.length - 3} 个页面` : ''}
+` : ''}
+
+💡 现在可以在 Notion 中查看和分析您的交易记录了！
+`.trim();
+        }
+
+        if (syncResult.errors.length > 0) {
+          message += `\n\n⚠️ <b>部分记录跳过：</b>\n${syncResult.errors.slice(0, 2).join('\n')}${syncResult.errors.length > 2 ? `\n... 还有 ${syncResult.errors.length - 2} 个问题` : ''}`;
+        }
+
+        await this.sendCommandMessage(chatId, message);
+      } else {
+        const errorCount = syncResult.errors.length;
+        const firstError = syncResult.errors[0] || '未知错误';
+        
+        // 如果是字段不存在的错误，提供特定解决方案
+        const isFieldError = firstError.includes('is not a property that exists');
+        
+        let message = '';
+        if (isFieldError) {
+          message = `
+❌ <b>Notion 数据库字段不匹配</b>
+
+🔍 <b>问题：</b>
+数据库缺少必需的字段
+
+📋 <b>需要创建的字段：</b>
+• Instrument (Text)
+• Direction (Select: LONG, SHORT)  
+• Status (Select: OPEN, CLOSED)
+• Entry Price (Number)
+• Exit Price (Number)
+• PNL (Number)
+• 以及其他字段...
+
+💡 <b>解决方案：</b>
+请查看 NOTION_SETUP_GUIDE.md 中的完整字段列表，在您的 Notion 数据库中创建所有必需字段后重试。
+`.trim();
+        } else {
+          const shortError = firstError.length > 100 ? firstError.substring(0, 100) + '...' : firstError;
+          message = `
+❌ <b>Notion 同步失败</b>
+
+🔍 <b>错误：</b>
+${shortError}
+
+💡 <b>解决方案：</b>
+• 检查数据库结构和权限
+• 查看完整错误日志
+• 稍后重试同步
+`.trim();
+        }
+
+        await this.sendCommandMessage(chatId, message);
+      }
+    } catch (error: any) {
+      this.logger.error('处理 /okx_report 命令失败:', error);
+      await this.sendCommandMessage(chatId, '❌ 同步到 Notion 失败，请稍后重试');
+    }
+  }
+
+  /**
+   * 处理查看未同步记录命令
+   */
+  private async handleOkxUnsyncedCommand(chatId: number): Promise<void> {
+    try {
+      await this.sendCommandMessage(chatId, '🔄 正在获取未同步记录...');
+
+      const unsyncedRecords = await this.tradingHistoryService.getUnsyncedRecords();
+
+      if (unsyncedRecords.length === 0) {
+        await this.sendCommandMessage(chatId, '✅ <b>同步状态</b>\n\n所有交易记录都已同步到 Notion');
+        return;
+      }
+
+      let message = `📋 <b>未同步到 Notion 的记录 (${unsyncedRecords.length} 笔)</b>\n\n`;
+
+      for (const record of unsyncedRecords.slice(0, 10)) {
+        const directionIcon = record.direction === 'LONG' ? '🟢' : '🔴';
+        const pnlIcon = (record.pnl && Number(record.pnl) > 0) ? '💰' : '📉';
+        
+        message += `${directionIcon} <b>${record.instrument}</b>\n`;
+        message += `🏷️ <code>${record.tradeId}</code>\n`;
+        
+        if (record.pnl) {
+          message += `${pnlIcon} PNL: $${Number(record.pnl).toFixed(2)}\n`;
+        }
+        if (record.entryTime) {
+          message += `⏰ ${new Date(record.entryTime).toLocaleString('zh-CN')}\n`;
+        }
+        message += '\n';
+      }
+
+      if (unsyncedRecords.length > 10) {
+        message += `... 还有 ${unsyncedRecords.length - 10} 笔记录\n\n`;
+      }
+
+      message += '💡 完成 Notion 集成后可一键同步所有记录';
+
+      await this.sendCommandMessage(chatId, message);
+
+    } catch (error) {
+      this.logger.error('获取未同步记录失败:', error);
+      await this.sendCommandMessage(chatId, `❌ 获取未同步记录失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 处理交易表现分析命令
+   */
+  private async handleOkxPerformanceCommand(chatId: number, args: string[]): Promise<void> {
+    try {
+      await this.sendCommandMessage(chatId, '📈 正在分析交易表现...');
+
+      const stats = await this.tradingHistoryService.getStatistics({});
+
+      const avgWinAmount = stats.profitableTrades > 0 ? 
+        Number(stats.totalPnl) / stats.profitableTrades : 0;
+
+      const message = `
+📈 <b>交易表现分析</b>
+
+📊 <b>整体表现</b>
+• 总交易: ${stats.totalTrades} 笔
+• 胜率: ${stats.winRate}%
+• 净盈亏: $${Number(stats.netPnl).toFixed(2)}
+
+💡 <b>关键指标</b>
+• 平均盈利: $${avgWinAmount.toFixed(2)}
+• 手续费占比: ${stats.totalPnl > 0 ? ((Number(stats.totalFees) / Number(stats.totalPnl)) * 100).toFixed(1) + '%' : 'N/A'}
+
+🎯 <b>表现评级</b>
+• 胜率评级: ${this.getRatingByWinRate(stats.winRate)}
+• 盈亏评级: ${this.getRatingByPnl(Number(stats.netPnl))}
+
+📝 <b>优化建议</b>
+${this.getPerformanceSuggestions(stats)}
+`.trim();
+
+      await this.sendCommandMessage(chatId, message);
+
+    } catch (error) {
+      this.logger.error('分析交易表现失败:', error);
+      await this.sendCommandMessage(chatId, `❌ 表现分析失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 根据胜率获取评级
+   */
+  private getRatingByWinRate(winRate: number): string {
+    if (winRate >= 70) return '🌟 优秀';
+    if (winRate >= 60) return '👍 良好';
+    if (winRate >= 50) return '✅ 及格';
+    if (winRate >= 40) return '⚠️ 需改进';
+    return '🚨 较差';
+  }
+
+  /**
+   * 根据净盈亏获取评级
+   */
+  private getRatingByPnl(netPnl: number): string {
+    if (netPnl >= 1000) return '🌟 优秀';
+    if (netPnl >= 500) return '👍 良好';
+    if (netPnl >= 100) return '✅ 及格';
+    if (netPnl >= 0) return '⚠️ 保本';
+    return '🚨 亏损';
+  }
+
+  /**
+   * 获取表现优化建议
+   */
+  private getPerformanceSuggestions(stats: any): string {
+    const suggestions = [];
+    
+    if (stats.winRate < 50) {
+      suggestions.push('• 考虑优化入场时机和策略选择');
+    }
+    
+    if (Number(stats.totalFees) / Number(stats.totalPnl) > 0.1) {
+      suggestions.push('• 手续费占比较高，考虑降低交易频率');
+    }
+    
+    if (stats.completedTrades < 30) {
+      suggestions.push('• 样本数量较少，需要更多交易数据');
+    }
+    
+    if (Number(stats.netPnl) < 0) {
+      suggestions.push('• 建议重新评估交易策略和风控设置');
+    }
+    
+    return suggestions.length > 0 ? suggestions.join('\n') : '• 当前表现良好，继续保持！';
   }
 
   /**

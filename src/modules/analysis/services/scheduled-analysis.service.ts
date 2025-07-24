@@ -20,7 +20,7 @@ export class ScheduledAnalysisService {
   /**
    * 每5分钟执行一次综合多周期分析
    */
-  @Cron('0 */5 * * * *') // 每5分钟的第0秒执行
+  // @Cron('0 */5 * * * *') // 每5分钟的第0秒执行
   async performComprehensiveMultiTimeframeAnalysis(): Promise<void> {
     try {
       this.logger.log(`🕐 开始执行5分钟综合多周期分析`);
@@ -229,7 +229,7 @@ export class ScheduledAnalysisService {
   /**
    * 每天早上8点执行日线分析（保留）
    */
-  @Cron('0 0 8 * * *') // 每天早上8点执行
+  // @Cron('0 0 8 * * *') // 每天早上8点执行
   async analyzeDailyInterval(): Promise<void> {
     await this.executeScheduledAnalysis(IntervalType.ONE_DAY, '日线');
   }

@@ -8,13 +8,16 @@ import { DataModule } from './modules/data/data.module';
 import { AnalysisModule } from './modules/analysis/analysis.module';
 import { StrategyModule } from './modules/strategy/strategy.module';
 import { NotificationModule } from './modules/notification/notification.module';
-import { appConfig, databaseConfig, redisConfig, binanceConfig } from './config';
+import { TradingHistoryModule } from './modules/trading-history/trading-history.module';
+import { OkxIntegrationModule } from './modules/okx-integration/okx-integration.module';
+import { NotionIntegrationModule } from './modules/notion-integration/notion-integration.module';
+import { appConfig, databaseConfig, redisConfig, binanceConfig, okxConfig, notionConfig } from './config';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, redisConfig, binanceConfig],
+      load: [appConfig, databaseConfig, redisConfig, binanceConfig, okxConfig, notionConfig],
     }),
     PrismaModule,
     CoinConfigModule,
@@ -22,6 +25,9 @@ import { appConfig, databaseConfig, redisConfig, binanceConfig } from './config'
     AnalysisModule,
     StrategyModule,
     NotificationModule,
+    TradingHistoryModule,
+    OkxIntegrationModule,
+    NotionIntegrationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
