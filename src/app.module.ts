@@ -11,6 +11,9 @@ import { NotificationModule } from './modules/notification/notification.module';
 import { TradingHistoryModule } from './modules/trading-history/trading-history.module';
 import { OkxIntegrationModule } from './modules/okx-integration/okx-integration.module';
 import { NotionIntegrationModule } from './modules/notion-integration/notion-integration.module';
+// import { TradingDecisionModule } from './modules/trading-decision/trading-decision.module'; // 已被CCXT模块替代
+import { CCXTAnalysisModule } from './modules/ccxt-analysis/ccxt-analysis.module';
+import { TechnicalAnalysisModule } from './modules/technical-analysis/technical-analysis.module';
 import { appConfig, databaseConfig, redisConfig, binanceConfig, okxConfig, notionConfig } from './config';
 
 @Module({
@@ -28,6 +31,9 @@ import { appConfig, databaseConfig, redisConfig, binanceConfig, okxConfig, notio
     TradingHistoryModule,
     OkxIntegrationModule,
     NotionIntegrationModule,
+    // TradingDecisionModule, // 已被CCXT模块替代
+    CCXTAnalysisModule,
+    TechnicalAnalysisModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -62,6 +62,9 @@ importers:
       cache-manager-redis-store:
         specifier: ^3.0.1
         version: 3.0.1
+      ccxt:
+        specifier: ^4.4.96
+        version: 4.4.96
       class-transformer:
         specifier: ^0.5.1
         version: 0.5.1
@@ -1313,6 +1316,10 @@ packages:
 
   caseless@0.12.0:
     resolution: {integrity: sha512-4tYFyifaFfGacoiObjJegolkwSU4xQNGbVgUiNYVUxbQ2x2lUsFvY4hVgVzGiIe6WLOPqycWXA40l+PWsxthUw==}
+
+  ccxt@4.4.96:
+    resolution: {integrity: sha512-YzZdm/pVDSeeO5F9r6NLSW2l2DMR4jTGS+DBHxziDYJ1nDDW77QTm3oeubSjRMJk25q4llMTweYBtbh4+dgDRA==}
+    engines: {node: '>=15.0.0'}
 
   chalk@4.1.2:
     resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
@@ -5314,6 +5321,13 @@ snapshots:
   caniuse-lite@1.0.30001727: {}
 
   caseless@0.12.0: {}
+
+  ccxt@4.4.96:
+    dependencies:
+      ws: 8.18.3
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
 
   chalk@4.1.2:
     dependencies:

@@ -49,6 +49,7 @@
     "axios": "^1.10.0",
     "cache-manager": "^7.0.1",
     "cache-manager-redis-store": "^3.0.1",
+    "ccxt": "^4.4.96",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "crypto-js": "^4.2.0",

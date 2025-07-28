@@ -247,3 +247,94 @@ model TradingRecord {
   @@index([entryTime, exitTime])
   @@map("trading_records")
 }
+
+// 交易机会表
+model TradingOpportunity {
+  id                String   @id @default(uuid())
+  symbol            String   @db.VarChar(20)
+  direction         String   @db.VarChar(10) // 'LONG' | 'SHORT'
+  marketState       String   @db.VarChar(20) @map("market_state") // 'UPTREND' | 'DOWNTREND' | 'RANGING'
+  riskRewardRatio   Decimal  @db.Decimal(8, 2) @map("risk_reward_ratio")
+  entryPrice        Decimal? @db.Decimal(30, 8) @map("entry_price")
+  takeProfit        Decimal? @db.Decimal(30, 8) @map("take_profit")
+  stopLoss          Decimal? @db.Decimal(30, 8) @map("stop_loss")
+  status            String   @db.VarChar(20) // 'WATCHING' | 'TRIGGERED' | 'EXPIRED'
+  confidence        Decimal? @db.Decimal(5, 2) // 置信度(0-100)
+  reason            String?  @db.Text // 创建原因
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  expiredAt         DateTime? @map("expired_at")
+  
+  // 关联的信号
+  actionableSignals ActionableSignal[]
+  
+  @@index([symbol, status, createdAt])
+  @@index([marketState, riskRewardRatio])
+  @@index([status, expiredAt])
+  @@map("trading_opportunities")
+}
+
+// 可执行信号表
+model ActionableSignal {
+  id                    String   @id @default(uuid())
+  opportunityId         String   @map("opportunity_id")
+  signalType            String   @db.VarChar(30) @map("signal_type") // 'STRUCTURE_BREAKOUT' | 'PULLBACK_CONFIRMATION' | 'PATTERN_BREAKOUT'
+  triggerPrice          Decimal  @db.Decimal(30, 8) @map("trigger_price")
+  entryPrice            Decimal  @db.Decimal(30, 8) @map("entry_price")
+  takeProfit            Decimal  @db.Decimal(30, 8) @map("take_profit")
+  stopLoss              Decimal  @db.Decimal(30, 8) @map("stop_loss")
+  riskRewardRatio       Decimal  @db.Decimal(8, 2) @map("risk_reward_ratio")
+  confidence            Decimal  @db.Decimal(5, 2) // 置信度(0-100)
+  reason                String   @db.Text // 信号触发原因
+  triggeredAt           DateTime @default(now()) @map("triggered_at")
+  status                String   @db.VarChar(20) // 'ACTIVE' | 'EXECUTED' | 'EXPIRED'
+  executedAt            DateTime? @map("executed_at")
+  
+  // 关联的交易机会
+  opportunity           TradingOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  
+  @@index([opportunityId, status])
+  @@index([signalType, triggeredAt])
+  @@index([status, confidence])
+  @@map("actionable_signals")
+}
+
+// 市场状态记录表
+model MarketState {
+  id            String   @id @default(uuid())
+  symbol        String   @db.VarChar(20)
+  timeframe     String   @db.VarChar(10) // 'D1' | 'H4'
+  state         String   @db.VarChar(20) // 'UPTREND' | 'DOWNTREND' | 'RANGING'
+  ema21         Decimal  @db.Decimal(30, 8) // EMA21值
+  ema55         Decimal  @db.Decimal(30, 8) // EMA55值
+  currentPrice  Decimal  @db.Decimal(30, 8) @map("current_price")
+  confidence    Decimal  @db.Decimal(5, 2) // 置信度(0-100)
+  details       String?  @db.Text // 详细分析信息(JSON)
+  analyzedAt    DateTime @default(now()) @map("analyzed_at")
+  
+  @@unique([symbol, timeframe])
+  @@index([symbol, timeframe, analyzedAt])
+  @@index([state, confidence])
+  @@map("market_states")
+}
+
+// 支撑阻力位表
+model SupportResistanceLevel {
+  id          String   @id @default(uuid())
+  symbol      String   @db.VarChar(20)
+  timeframe   String   @db.VarChar(10) // 'D1' | 'H4'
+  levelType   String   @db.VarChar(20) @map("level_type") // 'SUPPORT' | 'RESISTANCE'
+  price       Decimal  @db.Decimal(30, 8)
+  strength    Decimal  @db.Decimal(5, 2) // 强度评分(0-100)
+  touches     Int      @default(1) // 触及次数
+  lastTouch   DateTime? @map("last_touch") // 最后触及时间
+  isActive    Boolean  @default(true) @map("is_active") // 是否仍然有效
+  details     String?  @db.Text // 详细信息(JSON)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  
+  @@unique([symbol, timeframe, price, levelType])
+  @@index([symbol, timeframe, levelType])
+  @@index([isActive, strength])
+  @@map("support_resistance_levels")
+}
