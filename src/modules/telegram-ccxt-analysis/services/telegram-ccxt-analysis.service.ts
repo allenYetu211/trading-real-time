@@ -448,6 +448,9 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
           const currentState = this.getUserState(chatId.toString());
           const analysisType = currentState?.data?.analysisType || 'quick';
           
+          console.log('custom_symbol 回调 - 当前状态:', currentState);
+          console.log('custom_symbol 回调 - 分析类型:', analysisType);
+          
           // 设置用户状态为等待自定义交易对输入，保存分析类型
           this.setUserState(chatId.toString(), 'waiting_custom_symbol', { analysisType });
           await this.sendMessage(chatId, 
