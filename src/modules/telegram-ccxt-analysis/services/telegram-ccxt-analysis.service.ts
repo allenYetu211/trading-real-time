@@ -430,6 +430,8 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
           // 处理带参数的 symbols_list 回调
           if (params.length > 0) {
             const analysisType = params[0];
+            // 保存当前分析类型到用户状态中，供自定义输入时使用
+            this.setUserState(chatId.toString(), 'symbols_list_context', { analysisType });
             await this.sendSymbolSelectionMenu(chatId, analysisType);
           } else {
             // 不带参数时显示默认的交易对列表菜单
@@ -439,6 +441,22 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
 
         case 'help':
           await this.handleHelpCommand(chatId);
+          break;
+
+        case 'custom_symbol':
+          // 获取当前分析类型
+          const currentState = this.getUserState(chatId.toString());
+          const analysisType = currentState?.data?.analysisType || 'quick';
+          
+          // 设置用户状态为等待自定义交易对输入，保存分析类型
+          this.setUserState(chatId.toString(), 'waiting_custom_symbol', { analysisType });
+          await this.sendMessage(chatId, 
+            '🔍 <b>请输入要分析的交易对</b>\n\n' +
+            '📝 <b>格式示例：</b>\n' +
+            '• BTCUSDT\n' +
+            '• ETHUSDT\n' +
+            '• DOGEUSDT\n\n' +
+            '💡 <b>提示：</b>请输入有效的交易对符号');
           break;
 
         default:
@@ -498,7 +516,33 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
    */
   private async handleCustomSymbolInput(chatId: number, symbol: string): Promise<void> {
     const cleanSymbol = symbol.toUpperCase().trim();
-    await this.performQuickAnalysis(cleanSymbol, '1d', chatId);
+    
+    // 获取用户状态以确定分析类型
+    const userState = this.getUserState(chatId.toString());
+    const analysisType = userState?.data?.analysisType || 'quick';
+    
+    // 清除用户状态
+    this.clearUserState(chatId.toString());
+    
+    // 根据分析类型执行相应的分析
+    switch (analysisType) {
+      case 'analyze':
+        await this.performDetailedAnalysis(chatId, cleanSymbol, '1d');
+        break;
+      case 'trend':
+        await this.performTrendAnalysis(cleanSymbol, chatId);
+        break;
+      case 'support_resistance':
+        await this.performSupportResistanceAnalysis(cleanSymbol, chatId);
+        break;
+      case 'comprehensive':
+        await this.performTechnicalAnalysis(cleanSymbol, 'comprehensive', chatId);
+        break;
+      case 'quick':
+      default:
+        await this.performQuickAnalysis(cleanSymbol, '1d', chatId);
+        break;
+    }
   }
 
   /**
