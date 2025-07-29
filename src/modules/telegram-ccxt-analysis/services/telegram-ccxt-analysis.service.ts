@@ -595,7 +595,7 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
 📈 <b>详细分析</b> - 完整的 EMA 技术分析
 📊 <b>趋势分析</b> - 多时间周期趋势分析
 🎯 <b>支撑阻力</b> - 支撑阻力位识别
-🔍 <b>完整技术分析</b> - 综合技术分析报告
+🔍 <b>完整技术分析</b> - EMA + 趋势 + 支撑阻力位全套分析
 💎 <b>热门交易对</b> - 查看主流加密货币
 ❓ <b>帮助</b> - 查看使用说明
 
@@ -641,7 +641,7 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
         break;
       case 'comprehensive':
         actionText = '完整技术分析';
-        description = '综合技术分析报告';
+        description = 'EMA + 多时间周期趋势 + 支撑阻力位完整分析';
         break;
       case 'quick':
       default:
@@ -1125,13 +1125,21 @@ ${this.getDetailedAdvice(analysis, detailedData)}
         return;
       }
 
-      // 完整分析：并行执行趋势分析和支撑阻力位分析
-      const [trendAnalysis, srAnalysis] = await Promise.all([
+      // 完整分析：并行执行所有分析功能
+      const [emaAnalysis, emaDetailedData, trendAnalysis, srAnalysis] = await Promise.all([
+        this.emaAnalysisService.analyzeEMA(symbol, '1d', [20, 60, 120]),
+        this.emaAnalysisService.getDetailedEMAData(symbol, '1d', [20, 60, 120]),
         this.multiTimeframeTrendService.analyzeMultiTimeframeTrend(symbol),
         this.supportResistanceService.analyzeSupportResistance(symbol),
       ]);
 
-      const message = this.formatComprehensiveAnalysisMessage(symbol, trendAnalysis, srAnalysis);
+      const message = this.formatFullComprehensiveAnalysisMessage(
+        symbol, 
+        emaAnalysis, 
+        emaDetailedData, 
+        trendAnalysis, 
+        srAnalysis
+      );
       await this.sendMessage(targetChatId, message);
 
     } catch (error) {
@@ -1290,6 +1298,104 @@ ${trendEmoji} 整体趋势: ${this.getTrendDescription(overallTrend)}
 ${this.getActionEmoji(tradingSuggestion.action)} <b>${this.getActionDescription(tradingSuggestion.action)}</b>
 📝 ${tradingSuggestion.reason}
 ⚠️ 风险级别: ${tradingSuggestion.riskLevel}
+
+⏰ <b>分析时间:</b> ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+`.trim();
+
+    return message;
+  }
+
+  /**
+   * 格式化完整技术分析消息 (包含所有分析结果)
+   */
+  private formatFullComprehensiveAnalysisMessage(
+    symbol: string, 
+    emaAnalysis: any, 
+    emaDetailedData: any, 
+    trendAnalysis: any, 
+    srAnalysis: any
+  ): string {
+    const { overallTrend, overallConfidence, tradingSuggestion, timeframes, trendAlignment } = trendAnalysis;
+    const { currentPrice, keyLevels, currentPosition, allLevels, tradingZones } = srAnalysis;
+
+    const trendEmoji = this.getTrendEmoji(overallTrend);
+    const confidenceLevel = this.getConfidenceLevel(overallConfidence);
+
+    let message = `
+🔍 <b>${symbol} 完整技术分析报告</b>
+
+💰 <b>价格信息:</b>
+• 当前价格: $${this.formatPrice(currentPrice)}
+• 最高价: $${this.formatPrice(emaDetailedData.priceRange.max)}
+• 最低价: $${this.formatPrice(emaDetailedData.priceRange.min)}
+
+📊 <b>EMA 技术指标:</b>
+• EMA20: $${this.formatPrice(emaAnalysis.ema20)}
+• EMA60: $${this.formatPrice(emaAnalysis.ema60)}
+• EMA120: $${this.formatPrice(emaAnalysis.ema120)}
+
+📈 <b>多时间周期趋势:</b>
+${trendEmoji} 整体趋势: ${this.getTrendDescription(overallTrend)}
+🎯 整体置信度: ${overallConfidence}% (${confidenceLevel})
+🔗 趋势一致性: ${trendAlignment.isAligned ? '✅ 一致' : '❌ 冲突'} (${trendAlignment.alignmentScore}%)
+
+📊 <b>各时间周期:</b>
+`;
+
+    // 添加各时间周期的详细信息
+    Object.entries(timeframes).forEach(([tf, data]: [string, any]) => {
+      const tfEmoji = this.getTimeframeEmoji(tf);
+      const tfTrendEmoji = this.getTrendEmoji(data.trend);
+      message += `${tfEmoji} ${tf}: ${tfTrendEmoji} ${this.getTrendDescription(data.trend)} (${data.confidence}%)\n`;
+    });
+
+    message += `
+🎯 <b>支撑阻力位:</b>
+`;
+
+    if (keyLevels.nearestSupport) {
+      const support = keyLevels.nearestSupport;
+      const distance = ((currentPrice - support.priceRange.center) / currentPrice * 100).toFixed(2);
+      message += `📉 最近支撑: $${this.formatPrice(support.priceRange.center)} (-${distance}%) [${support.strength}]\n`;
+    }
+
+    if (keyLevels.nearestResistance) {
+      const resistance = keyLevels.nearestResistance;
+      const distance = ((resistance.priceRange.center - currentPrice) / currentPrice * 100).toFixed(2);
+      message += `📈 最近阻力: $${this.formatPrice(resistance.priceRange.center)} (+${distance}%) [${resistance.strength}]\n`;
+    }
+
+    message += `• 识别支撑位: ${allLevels.supports.length}个，阻力位: ${allLevels.resistances.length}个\n`;
+
+    message += `
+📍 <b>位置状态:</b> ${this.getPositionStatus(currentPosition)}
+`;
+
+    // 添加交易区间建议
+    if (tradingZones.buyZones.length > 0) {
+      message += `\n💚 <b>买入区间 (前3个):</b>\n`;
+      tradingZones.buyZones.slice(0, 3).forEach((zone: any) => {
+        message += `• $${this.formatPrice(zone.priceRange.min)} - $${this.formatPrice(zone.priceRange.max)} [${zone.strength}]\n`;
+      });
+    }
+
+    if (tradingZones.sellZones.length > 0) {
+      message += `\n🔴 <b>卖出区间 (前3个):</b>\n`;
+      tradingZones.sellZones.slice(0, 3).forEach((zone: any) => {
+        message += `• $${this.formatPrice(zone.priceRange.min)} - $${this.formatPrice(zone.priceRange.max)} [${zone.strength}]\n`;
+      });
+    }
+
+    message += `
+💡 <b>综合交易建议:</b>
+${this.getActionEmoji(tradingSuggestion.action)} <b>${this.getActionDescription(tradingSuggestion.action)}</b>
+📝 理由: ${tradingSuggestion.reason}
+⚠️ 风险级别: ${tradingSuggestion.riskLevel}
+
+📋 <b>数据统计:</b>
+• 数据点数: ${emaDetailedData.totalCount}
+• 数据源: ${emaDetailedData.exchange}
+• EMA 趋势: ${emaAnalysis.trend} (置信度: ${emaAnalysis.trendConfidence}%)
 
 ⏰ <b>分析时间:</b> ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
 `.trim();
