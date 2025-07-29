@@ -43,7 +43,7 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
 
   // 预设交易对列表
   private readonly POPULAR_SYMBOLS = [
-    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'SUIUSDT', 'DOGEUSDT'
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'TRXUSDT', 'SUIUSDT', 'HYPEUSDT'
   ];
 
   // 时间周期选项
