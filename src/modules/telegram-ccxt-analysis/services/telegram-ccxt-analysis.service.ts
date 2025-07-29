@@ -1125,10 +1125,10 @@ ${this.getDetailedAdvice(analysis, detailedData)}
         return;
       }
 
-      // 完整分析：并行执行所有分析功能
+      // 完整分析：并行执行所有分析功能 (使用100根K线，约4-5个月数据)
       const [emaAnalysis, emaDetailedData, trendAnalysis, srAnalysis] = await Promise.all([
         this.emaAnalysisService.analyzeEMA(symbol, '1d', [20, 60, 120]),
-        this.emaAnalysisService.getDetailedEMAData(symbol, '1d', [20, 60, 120]),
+        this.emaAnalysisService.getDetailedEMAData(symbol, '1d', [20, 60, 120], 100),
         this.multiTimeframeTrendService.analyzeMultiTimeframeTrend(symbol),
         this.supportResistanceService.analyzeSupportResistance(symbol),
       ]);
@@ -1321,13 +1321,17 @@ ${this.getActionEmoji(tradingSuggestion.action)} <b>${this.getActionDescription(
     const trendEmoji = this.getTrendEmoji(overallTrend);
     const confidenceLevel = this.getConfidenceLevel(overallConfidence);
 
+    // 计算基于100天数据的价格范围（更有参考价值）
+    const priceRange = this.calculateRecentPriceRange(emaDetailedData, 100);
+
     let message = `
 🔍 <b>${symbol} 完整技术分析报告</b>
 
 💰 <b>价格信息:</b>
 • 当前价格: $${this.formatPrice(currentPrice)}
-• 最高价: $${this.formatPrice(emaDetailedData.priceRange.max)}
-• 最低价: $${this.formatPrice(emaDetailedData.priceRange.min)}
+• 100天最高: $${this.formatPrice(priceRange.max)}
+• 100天最低: $${this.formatPrice(priceRange.min)}
+• 价格区间: ${((currentPrice - priceRange.min) / (priceRange.max - priceRange.min) * 100).toFixed(1)}%位置
 
 📊 <b>EMA 技术指标:</b>
 • EMA20: $${this.formatPrice(emaAnalysis.ema20)}
@@ -1371,18 +1375,20 @@ ${trendEmoji} 整体趋势: ${this.getTrendDescription(overallTrend)}
 📍 <b>位置状态:</b> ${this.getPositionStatus(currentPosition)}
 `;
 
-    // 添加交易区间建议
-    if (tradingZones.buyZones.length > 0) {
-      message += `\n💚 <b>买入区间 (前3个):</b>\n`;
-      tradingZones.buyZones.slice(0, 3).forEach((zone: any) => {
-        message += `• $${this.formatPrice(zone.priceRange.min)} - $${this.formatPrice(zone.priceRange.max)} [${zone.strength}]\n`;
+    // 生成精确交易区间建议
+    const preciseTradingZones = this.generatePreciseTradingZones(srAnalysis, currentPrice);
+    
+    if (preciseTradingZones.buyZones.length > 0) {
+      message += `\n💚 <b>精确买入区间:</b>\n`;
+      preciseTradingZones.buyZones.forEach((zone: any) => {
+        message += `• $${this.formatPrice(zone.entry)} (±$${this.formatPrice(zone.tolerance)}) [${zone.confidence}%]\n`;
       });
     }
 
-    if (tradingZones.sellZones.length > 0) {
-      message += `\n🔴 <b>卖出区间 (前3个):</b>\n`;
-      tradingZones.sellZones.slice(0, 3).forEach((zone: any) => {
-        message += `• $${this.formatPrice(zone.priceRange.min)} - $${this.formatPrice(zone.priceRange.max)} [${zone.strength}]\n`;
+    if (preciseTradingZones.sellZones.length > 0) {
+      message += `\n🔴 <b>精确卖出区间:</b>\n`;
+      preciseTradingZones.sellZones.forEach((zone: any) => {
+        message += `• $${this.formatPrice(zone.entry)} (±$${this.formatPrice(zone.tolerance)}) [${zone.confidence}%]\n`;
       });
     }
 
@@ -1466,5 +1472,84 @@ ${this.getActionEmoji(tradingSuggestion.action)} <b>${this.getActionDescription(
     if (currentPosition.inResistanceZone) return '位于阻力区域 📈';
     if (currentPosition.betweenLevels) return '位于关键位之间 📊';
     return '位置待定 ❓';
+  }
+
+  /**
+   * 计算基于最近数据的价格范围
+   */
+  private calculateRecentPriceRange(emaDetailedData: any, limitDays: number): { min: number; max: number } {
+    // 如果有完整的价格历史数据，使用最近的部分
+    if (emaDetailedData.fullEMAHistory && emaDetailedData.fullEMAHistory.ema20) {
+      const recentPrices = emaDetailedData.recent10Prices || [];
+      // 如果recent10Prices不够，就使用原始的priceRange
+      if (recentPrices.length >= 10) {
+        return {
+          min: Math.min(...recentPrices),
+          max: Math.max(...recentPrices)
+        };
+      }
+    }
+
+    // 如果数据量是基于100天的，直接使用
+    if (emaDetailedData.totalCount <= limitDays * 1.2) {
+      return emaDetailedData.priceRange;
+    }
+
+    // 否则使用原始范围，但添加说明这是基于限制数据的
+    return emaDetailedData.priceRange;
+  }
+
+  /**
+   * 生成精确交易区间
+   */
+  private generatePreciseTradingZones(srAnalysis: any, currentPrice: number): any {
+    const { keyLevels, allLevels } = srAnalysis;
+    
+    // 计算合适的容错范围（基于当前价格的0.3-0.8%）
+    const baseTolerancePercent = 0.005; // 0.5%
+    const baseTolerance = currentPrice * baseTolerancePercent;
+
+    const buyZones: any[] = [];
+    const sellZones: any[] = [];
+
+    // 处理支撑位 - 优先使用最近的强支撑位
+    const strongSupports = allLevels.supports
+      .filter((s: any) => s.confidence >= 70 && s.strength !== 'WEAK')
+      .slice(0, 3);
+
+    strongSupports.forEach((support: any) => {
+      const entry = support.priceRange.center;
+      const tolerance = Math.min(baseTolerance, Math.abs(support.priceRange.max - support.priceRange.min) / 4);
+      
+      buyZones.push({
+        entry,
+        tolerance,
+        confidence: support.confidence,
+        reason: `${support.timeframe}级别${support.strength}支撑位`,
+        stopLoss: entry - tolerance * 2,
+        target: currentPrice + (currentPrice - entry) * 0.618 // 黄金分割比例
+      });
+    });
+
+    // 处理阻力位 - 优先使用最近的强阻力位
+    const strongResistances = allLevels.resistances
+      .filter((r: any) => r.confidence >= 70 && r.strength !== 'WEAK')
+      .slice(0, 3);
+
+    strongResistances.forEach((resistance: any) => {
+      const entry = resistance.priceRange.center;
+      const tolerance = Math.min(baseTolerance, Math.abs(resistance.priceRange.max - resistance.priceRange.min) / 4);
+      
+      sellZones.push({
+        entry,
+        tolerance,
+        confidence: resistance.confidence,
+        reason: `${resistance.timeframe}级别${resistance.strength}阻力位`,
+        stopLoss: entry + tolerance * 2,
+        target: currentPrice - (entry - currentPrice) * 0.618 // 黄金分割比例
+      });
+    });
+
+    return { buyZones, sellZones };
   }
 } 
