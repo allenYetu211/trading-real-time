@@ -43,8 +43,7 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
 
   // 预设交易对列表
   private readonly POPULAR_SYMBOLS = [
-    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'DOTUSDT',
-    'LINKUSDT', 'UNIUSDT', 'AVAXUSDT', 'MATICUSDT', 'ATOMUSDT'
+    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'SUIUSDT', 'DOGEUSDT'
   ];
 
   // 时间周期选项
@@ -394,6 +393,8 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
 
       const [action, ...params] = data.split(':');
 
+      console.log('action', action);
+
       switch (action) {
         case 'analyze_symbol':
           const symbol = params[0];
@@ -426,7 +427,14 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
           break;
 
         case 'symbols_list':
-          await this.sendSymbolsListMenu(chatId);
+          // 处理带参数的 symbols_list 回调
+          if (params.length > 0) {
+            const analysisType = params[0];
+            await this.sendSymbolSelectionMenu(chatId, analysisType);
+          } else {
+            // 不带参数时显示默认的交易对列表菜单
+            await this.sendSymbolsListMenu(chatId);
+          }
           break;
 
         case 'help':
@@ -567,9 +575,38 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
       ]
     };
 
-    const actionText = analysisType === 'analyze' ? '详细分析' : '快速分析';
+    // 根据分析类型设置对应的文本描述
+    let actionText: string;
+    let description: string;
+    
+    switch (analysisType) {
+      case 'analyze':
+        actionText = '详细分析';
+        description = '完整的 EMA 技术分析';
+        break;
+      case 'trend':
+        actionText = '趋势分析';
+        description = '多时间周期趋势分析';
+        break;
+      case 'support_resistance':
+        actionText = '支撑阻力分析';
+        description = '支撑阻力位识别';
+        break;
+      case 'comprehensive':
+        actionText = '完整技术分析';
+        description = '综合技术分析报告';
+        break;
+      case 'quick':
+      default:
+        actionText = '快速分析';
+        description = 'EMA 指标概览';
+        break;
+    }
+
     const message = `
 💎 <b>选择要${actionText}的交易对</b>
+
+📊 <b>分析类型：</b>${description}
 
 点击下方按钮选择热门交易对，或选择"输入自定义交易对"来分析其他币种：
 `.trim();
