@@ -34,7 +34,7 @@ export class PriceTriggerDetectionService {
       const latestAnalysis = await this.getLatestAnalysisResult(symbol);
       
       if (!latestAnalysis || !latestAnalysis.buyZones || !latestAnalysis.sellZones) {
-        this.logger.debug(`${symbol} 没有可用的交易区间数据`);
+        // this.logger.debug(`${symbol} 没有可用的交易区间数据`);
         return;
       }
 

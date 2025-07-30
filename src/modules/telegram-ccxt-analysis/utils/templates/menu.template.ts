@@ -5,10 +5,7 @@ import { SymbolOption } from '../interfaces';
  * 管理所有Telegram Bot的菜单模板
  */
 export class MenuTemplate {
-  // 预设交易对列表（现货格式）
-  static readonly POPULAR_SYMBOLS = [
-    'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'TRXUSDT', 'SUIUSDT', 'HYPEUSDT'
-  ];
+  // 注意：预设交易对已移除，现在使用数据库动态配置
 
   // 时间周期选项
   static readonly TIMEFRAMES = [
@@ -44,8 +41,9 @@ export class MenuTemplate {
 <b>📝 命令列表:</b>
 /help - 显示帮助信息
 /technical - 完整技术分析
-/rsi - RSI技术指标分析
-/oi - 持仓量数据分析
+/list - 查看关注列表
+/add &lt;symbol&gt; - 添加交易对
+/remove &lt;symbol&gt; - 移除交易对
 /status - 查看机器人状态
 `.trim();
   }
@@ -63,12 +61,18 @@ export class MenuTemplate {
 • 支撑阻力位识别
 • EMA趋势分析
 • 精确交易区间建议
+• 动态关注列表管理
 
-<b>⌨️ 命令说明:</b>
+<b>⌨️ 基础命令:</b>
 /start - 启动机器人并显示主菜单
 /help - 显示此帮助信息
-/technical <symbol> [type] - 完整技术分析
+/technical &lt;symbol&gt; [type] - 完整技术分析
 /status - 查看机器人运行状态
+
+<b>📋 关注列表管理:</b>
+/list 或 /watch_list - 查看当前关注的交易对列表
+/add &lt;symbol&gt; - 添加交易对到关注列表
+/remove &lt;symbol&gt; - 从关注列表移除交易对
 
 <b>📊 分析类型:</b>
 • comprehensive - 完整技术分析（默认）
@@ -78,13 +82,15 @@ export class MenuTemplate {
 
 <b>💡 使用示例:</b>
 /technical BTCUSDT - 比特币完整技术分析
-/technical ETHUSDT trend - 以太坊趋势分析
-/technical SOLUSDT support_resistance - SOL支撑阻力位分析
+/add ETHUSDT - 添加以太坊到关注列表
+/remove SOLUSDT - 从关注列表移除SOL
+/list - 查看所有关注的交易对
 
 <b>🔄 交互操作:</b>
 • 使用下方按钮快速选择交易对
 • 支持自定义交易对输入
 • 所有分析结果实时生成
+• 关注列表动态更新选择菜单
 `.trim();
   }
 
@@ -116,44 +122,23 @@ export class MenuTemplate {
   }
 
   /**
-   * 获取交易对选择菜单
+   * 获取交易对选择菜单（已废弃 - 现在使用动态数据库配置）
+   * @deprecated 此方法已被主服务中的showSymbolSelection替代
    */
   static getSymbolSelectionMenu(analysisType: string): any {
-    // 统一使用现货格式的交易对列表
-    const symbols = this.POPULAR_SYMBOLS;
-    
-    // 对于持仓量分析，需要转换为期货格式
-    const symbolButtons = symbols.map(symbol => {
-      const displayText = symbol.replace('USDT', ''); // BTCUSDT -> BTC
-      
-      // 对于持仓量分析，回调数据中使用期货格式
-      let callbackSymbol = symbol;
-      if (analysisType === 'open_interest') {
-        const base = symbol.replace('USDT', '');
-        callbackSymbol = `${base}/USDT:USDT`;
-      }
-      
-      return {
-        text: displayText,
-        callback_data: `analyze:${callbackSymbol}:${analysisType}`
-      };
-    });
-
-    // 将按钮按3个一排排列
-    const rows = [];
-    for (let i = 0; i < symbolButtons.length; i += 3) {
-      rows.push(symbolButtons.slice(i, i + 3));
-    }
-
-    // 添加返回按钮
-    rows.push([
-      { text: '🔙 返回分析选择', callback_data: 'analysis_menu' },
-      { text: '🏠 主菜单', callback_data: 'main_menu' }
-    ]);
-
+    // 该方法已废弃，实际的交易对选择现在在TelegramCCXTAnalysisService.showSymbolSelection中处理
+    // 这里返回一个基本的菜单作为兼容性支持
     return {
       reply_markup: {
-        inline_keyboard: rows
+        inline_keyboard: [
+          [
+            { text: '❌ 请使用新的动态菜单', callback_data: 'analysis_menu' }
+          ],
+          [
+            { text: '🔙 返回分析选择', callback_data: 'analysis_menu' },
+            { text: '🏠 主菜单', callback_data: 'main_menu' }
+          ]
+        ]
       }
     };
   }

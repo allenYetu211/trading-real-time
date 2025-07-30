@@ -10,6 +10,7 @@ import { TelegramCCXTAnalysisService } from './services/telegram-ccxt-analysis.s
 // 外部模块
 import { CCXTAnalysisModule } from '../ccxt-analysis/ccxt-analysis.module';
 import { TechnicalAnalysisModule } from '../technical-analysis/technical-analysis.module';
+import { CoinConfigModule } from '../coin-config/coin-config.module';
 // import { NotificationModule } from '../notification/notification.module';
 
 /**
@@ -21,6 +22,7 @@ import { TechnicalAnalysisModule } from '../technical-analysis/technical-analysi
     ConfigModule,
     CCXTAnalysisModule,
     TechnicalAnalysisModule,
+    CoinConfigModule,
     // forwardRef(() => NotificationModule),
   ],
   controllers: [TelegramCCXTAnalysisController],

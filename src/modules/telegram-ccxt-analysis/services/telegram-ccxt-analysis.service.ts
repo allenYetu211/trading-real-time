@@ -10,6 +10,11 @@ import { RSIAnalysisService } from '../../ccxt-analysis/services/rsi-analysis.se
 import { MultiTimeframeTrendService } from '../../technical-analysis/services/multi-timeframe-trend.service';
 import { SupportResistanceService } from '../../technical-analysis/services/support-resistance.service';
 import { CoreTechnicalAnalysisService } from '../../technical-analysis/services/core-technical-analysis.service';
+import { CoinConfigService } from '../../coin-config/coin-config.service';
+import { IntervalType } from 'src/shared/enums';
+
+// 常量定义
+const DEFAULT_COIN_CONFIG_INTERVAL = 'default'; // 统一使用默认interval，因为分析会查询所有周期
 
 // 工具类导入
 import {
@@ -45,6 +50,7 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
     private readonly multiTimeframeTrendService: MultiTimeframeTrendService,
     private readonly supportResistanceService: SupportResistanceService,
     private readonly coreTechnicalAnalysisService: CoreTechnicalAnalysisService,
+    private readonly coinConfigService: CoinConfigService,
   ) {
     this.config = this.configService.get<TelegramConfig>('telegram')!;
   }
@@ -104,6 +110,26 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
         // 处理 /technical 命令
         if (text.startsWith('/technical')) {
           await this.handleTechnicalCommand(text, chatId);
+          return;
+        }
+
+        // 处理 /list 命令 - 查看关注列表
+        if (text === '/list' || text === '/watch_list') {
+          await this.handleListCommand(chatId);
+          return;
+        }
+
+        // 处理 /add 命令 - 添加token
+        if (text.startsWith('/add ')) {
+          const symbol = text.substring(5).trim().toUpperCase();
+          await this.handleAddCommand(chatId, symbol);
+          return;
+        }
+
+        // 处理 /remove 命令 - 移除token
+        if (text.startsWith('/remove ')) {
+          const symbol = text.substring(8).trim().toUpperCase();
+          await this.handleRemoveCommand(chatId, symbol);
           return;
         }
 
@@ -276,9 +302,216 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
    * 显示交易对选择
    */
   private async showSymbolSelection(chatId: number, analysisType: AnalysisType): Promise<void> {
-    const analysisDescription = AnalysisProcessorUtil.getAnalysisTypeDescription(analysisType);
-    const menuOptions = MenuTemplate.getSymbolSelectionMenu(analysisType);
-    await this.sendMessage(chatId, `请选择要进行${analysisDescription}的交易对：`, menuOptions);
+    try {
+      const analysisDescription = AnalysisProcessorUtil.getAnalysisTypeDescription(analysisType);
+      
+      // 从数据库获取活跃的交易对配置
+      const activeConfigs = await this.coinConfigService.findActiveConfigs();
+      
+      if (activeConfigs.length === 0) {
+        await BotManagerUtil.sendMessage(this.bot, chatId, `
+❌ <b>没有可用的交易对</b>
+
+目前没有配置任何关注的交易对。
+
+💡 <b>使用说明：</b>
+• 使用 <code>/add BTCUSDT</code> 添加交易对
+• 使用 <code>/list</code> 查看关注列表
+        `.trim(), { parse_mode: 'HTML' });
+        return;
+      }
+
+      // 获取唯一的交易对符号（去重）
+      const uniqueSymbols = [...new Set(activeConfigs.map(config => config.symbol))];
+      
+      // 生成交易对按钮
+      const symbolButtons = uniqueSymbols.map(symbol => {
+        const displayText = symbol.replace('USDT', ''); // BTCUSDT -> BTC
+        
+        // 对于持仓量分析，回调数据中使用期货格式
+        let callbackSymbol = symbol;
+        if (analysisType === 'open_interest') {
+          const base = symbol.replace('USDT', '');
+          callbackSymbol = `${base}/USDT:USDT`;
+        }
+        
+        return {
+          text: displayText,
+          callback_data: `analyze:${callbackSymbol}:${analysisType}`
+        };
+      });
+
+      // 将按钮按3个一排排列
+      const rows = [];
+      for (let i = 0; i < symbolButtons.length; i += 3) {
+        rows.push(symbolButtons.slice(i, i + 3));
+      }
+
+      // 添加返回按钮
+      rows.push([
+        { text: '🔙 返回分析选择', callback_data: 'analysis_menu' },
+        { text: '🏠 返回主菜单', callback_data: 'main_menu' }
+      ]);
+
+      const menuOptions = {
+        reply_markup: {
+          inline_keyboard: rows
+        }
+      };
+
+      await this.sendMessage(chatId, `请选择要进行${analysisDescription}的交易对 (${uniqueSymbols.length}个可选)：`, menuOptions);
+    } catch (error) {
+      this.logger.error('显示交易对选择菜单时出错:', error);
+      await this.sendErrorMessage(chatId, '获取交易对列表时发生错误');
+    }
+  }
+
+  // ==================== 新命令处理方法 ====================
+
+  /**
+   * 处理查看关注列表命令
+   */
+  private async handleListCommand(chatId: number): Promise<void> {
+    try {
+      const activeConfigs = await this.coinConfigService.findActiveConfigs();
+      
+      if (activeConfigs.length === 0) {
+        await BotManagerUtil.sendMessage(this.bot, chatId, `
+📋 <b>关注列表</b>
+
+目前没有配置任何关注的交易对。
+
+💡 <b>使用说明：</b>
+• 使用 <code>/add BTCUSDT</code> 添加交易对
+• 使用 <code>/remove BTCUSDT</code> 移除交易对
+        `.trim(), { parse_mode: 'HTML' });
+        return;
+      }
+
+      // 获取唯一的交易对符号
+      const uniqueSymbols = [...new Set(activeConfigs.map(config => config.symbol))];
+
+      let message = '📋 <b>当前关注的交易对列表</b>\n\n';
+      
+      // 按每行4个显示，更整洁
+      const symbolsPerRow = 4;
+      for (let i = 0; i < uniqueSymbols.length; i += symbolsPerRow) {
+        const row = uniqueSymbols.slice(i, i + symbolsPerRow);
+        message += `💰 ${row.join(' • ')}\n`;
+      }
+
+      message += `\n📊 总计: ${uniqueSymbols.length} 个交易对\n\n`;
+      message += `💡 <b>使用说明：</b>\n`;
+      message += `• 使用 <code>/add SYMBOL</code> 添加交易对\n`;
+      message += `• 使用 <code>/remove SYMBOL</code> 移除交易对\n`;
+      message += `• 分析时会自动查询所有时间周期的数据`;
+
+      await BotManagerUtil.sendMessage(this.bot, chatId, message, { parse_mode: 'HTML' });
+    } catch (error) {
+      this.logger.error('处理关注列表命令时出错:', error);
+      await this.sendErrorMessage(chatId, '获取关注列表时发生错误');
+    }
+  }
+
+  /**
+   * 处理添加token命令
+   */
+  private async handleAddCommand(chatId: number, symbol: string): Promise<void> {
+    if (!symbol) {
+      await BotManagerUtil.sendMessage(this.bot, chatId, `
+❌ <b>参数错误</b>
+
+请提供要添加的交易对符号。
+
+💡 <b>使用示例：</b>
+<code>/add BTCUSDT</code>
+<code>/add ETHUSDT</code>
+      `.trim(), { parse_mode: 'HTML' });
+      return;
+    }
+
+    try {
+      // 检查是否已存在
+      const existing = await this.coinConfigService.exists(symbol, DEFAULT_COIN_CONFIG_INTERVAL);
+      if (existing) {
+        await BotManagerUtil.sendMessage(this.bot, chatId, `
+⚠️ <b>交易对已存在</b>
+
+交易对 <code>${symbol}</code> 已在关注列表中。
+
+💡 使用 <code>/list</code> 查看完整列表
+        `.trim(), { parse_mode: 'HTML' });
+        return;
+      }
+
+      // 添加到数据库
+      await this.coinConfigService.create({
+        symbol,
+        interval: DEFAULT_COIN_CONFIG_INTERVAL as any, // 使用默认interval，分析会查询所有周期
+        isActive: true,
+      });
+
+      await BotManagerUtil.sendMessage(this.bot, chatId, `
+✅ <b>添加成功</b>
+
+交易对 <code>${symbol}</code> 已添加到关注列表。
+
+📊 使用 <code>/list</code> 查看完整列表
+💰 直接输入 <code>${symbol}</code> 进行分析
+      `.trim(), { parse_mode: 'HTML' });
+
+    } catch (error) {
+      this.logger.error(`添加交易对 ${symbol} 时出错:`, error);
+      await this.sendErrorMessage(chatId, `添加交易对 ${symbol} 时发生错误`);
+    }
+  }
+
+  /**
+   * 处理移除token命令
+   */
+  private async handleRemoveCommand(chatId: number, symbol: string): Promise<void> {
+    if (!symbol) {
+      await BotManagerUtil.sendMessage(this.bot, chatId, `
+❌ <b>参数错误</b>
+
+请提供要移除的交易对符号。
+
+💡 <b>使用示例：</b>
+<code>/remove BTCUSDT</code>
+<code>/remove ETHUSDT</code>
+      `.trim(), { parse_mode: 'HTML' });
+      return;
+    }
+
+    try {
+      // 查找配置
+      const config = await this.coinConfigService.findBySymbolAndInterval(symbol, DEFAULT_COIN_CONFIG_INTERVAL);
+      if (!config) {
+        await BotManagerUtil.sendMessage(this.bot, chatId, `
+❌ <b>交易对不存在</b>
+
+交易对 <code>${symbol}</code> 不在关注列表中。
+
+💡 使用 <code>/list</code> 查看当前关注列表
+        `.trim(), { parse_mode: 'HTML' });
+        return;
+      }
+
+      // 从数据库删除
+      await this.coinConfigService.remove(config.id);
+
+      await BotManagerUtil.sendMessage(this.bot, chatId, `
+✅ <b>移除成功</b>
+
+交易对 <code>${symbol}</code> 已从关注列表中移除。
+
+📊 使用 <code>/list</code> 查看当前列表
+      `.trim(), { parse_mode: 'HTML' });
+
+    } catch (error) {
+      this.logger.error(`移除交易对 ${symbol} 时出错:`, error);
+      await this.sendErrorMessage(chatId, `移除交易对 ${symbol} 时发生错误`);
+    }
   }
 
   /**
