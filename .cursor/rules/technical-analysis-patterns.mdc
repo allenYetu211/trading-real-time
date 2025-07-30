@@ -1,0 +1,356 @@
+# 技术分析模块开发模式和数据一致性规范
+
+## 🎯 核心原则：统一数据源
+
+**重要：所有技术分析功能必须基于 `CoreTechnicalAnalysisService` 确保数据一致性**
+
+### 正确的服务架构
+```typescript
+// ✅ 正确：使用核心服务作为唯一数据源
+export class SomeAnalysisService {
+  constructor(
+    private readonly coreTechnicalAnalysisService: CoreTechnicalAnalysisService
+  ) {}
+
+  async performAnalysis(symbol: string): Promise<AnalysisResult> {
+    // 通过核心服务获取数据
+    const coreResult = await this.coreTechnicalAnalysisService.performComprehensiveAnalysis(symbol);
+    
+    // 使用统一的格式化器
+    return SomeFormatter.formatMessage(symbol, coreResult.trendAnalysis);
+  }
+}
+
+// ❌ 错误：直接调用底层服务，可能导致数据不一致
+export class BadAnalysisService {
+  constructor(
+    private readonly multiTimeframeTrendService: MultiTimeframeTrendService,
+    private readonly supportResistanceService: SupportResistanceService
+  ) {}
+
+  async performAnalysis(symbol: string): Promise<AnalysisResult> {
+    // 直接调用，可能与核心服务计算结果不同
+    const trend = await this.multiTimeframeTrendService.analyzeMultiTimeframeTrend(symbol);
+    const sr = await this.supportResistanceService.analyzeSupportResistance(symbol);
+    // ...
+  }
+}
+```
+
+## 📊 数据一致性规范
+
+### 1. 技术分析数据获取模式
+```typescript
+// 标准模式：通过核心服务获取所有分析数据
+export class AnalysisProcessor {
+  /**
+   * 标准的技术分析数据获取方法
+   */
+  static async getUnifiedAnalysisData(
+    coreService: CoreTechnicalAnalysisService,
+    symbol: string
+  ): Promise<CoreTechnicalAnalysisResult> {
+    // 一次调用获取所有分析数据，确保一致性
+    return await coreService.performComprehensiveAnalysis(symbol);
+  }
+
+  /**
+   * 获取特定类型的分析数据
+   */
+  static async getTrendData(
+    coreService: CoreTechnicalAnalysisService,
+    symbol: string
+  ): Promise<TrendAnalysis> {
+    return await coreService.getTrendAnalysis(symbol);
+  }
+
+  static async getSupportResistanceData(
+    coreService: CoreTechnicalAnalysisService,
+    symbol: string
+  ): Promise<SupportResistanceAnalysis> {
+    return await coreService.getSupportResistanceAnalysis(symbol);
+  }
+}
+```
+
+### 2. 格式化一致性规范
+```typescript
+// ✅ 正确：使用统一的精确交易区间生成逻辑
+export class ConsistentFormatter {
+  static formatAnalysis(symbol: string, analysisData: any): string {
+    // 使用统一的精确交易区间逻辑
+    const preciseTradingZones = this.generatePreciseTradingZones(
+      analysisData.srAnalysis, 
+      analysisData.currentPrice
+    );
+
+    let message = `分析结果...`;
+
+    // 统一的精确区间格式
+    if (preciseTradingZones.buyZones.length > 0) {
+      message += `\n💚 <b>精确买入区间:</b>\n`;
+      preciseTradingZones.buyZones.forEach((zone: any) => {
+        message += `• $${FormatUtil.formatPrice(zone.entry)} (±$${FormatUtil.formatPrice(zone.tolerance)}) [${zone.confidence}%]\n`;
+      });
+    }
+
+    return message;
+  }
+
+  /**
+   * 统一的精确交易区间生成逻辑
+   * 必须与 ComprehensiveAnalysisFormatter 保持一致
+   */
+  private static generatePreciseTradingZones(srAnalysis: any, currentPrice: number): any {
+    // 标准化的区间计算逻辑
+    const baseTolerancePercent = 0.005; // 0.5%
+    const baseTolerance = currentPrice * baseTolerancePercent;
+    // ... 统一的计算逻辑
+  }
+}
+```
+
+## 🔧 技术分析工具类模式
+
+### 1. 分析处理器规范
+```typescript
+/**
+ * 技术分析处理器基类模式
+ */
+export abstract class BaseAnalysisProcessor {
+  protected static readonly logger = new Logger(this.name);
+
+  /**
+   * 标准的分析执行模板
+   */
+  static async executeAnalysis<T>(
+    coreService: CoreTechnicalAnalysisService,
+    symbol: string,
+    processor: (data: CoreTechnicalAnalysisResult) => T
+  ): Promise<T> {
+    try {
+      this.logger.log(`开始执行 ${symbol} 技术分析`);
+      
+      // 统一数据获取
+      const coreData = await coreService.performComprehensiveAnalysis(symbol);
+      
+      // 特定处理逻辑
+      const result = processor(coreData);
+      
+      this.logger.log(`${symbol} 技术分析完成`);
+      return result;
+      
+    } catch (error) {
+      this.logger.error(`技术分析失败 ${symbol}:`, error);
+      throw new Error(`技术分析失败: ${error.message}`);
+    }
+  }
+}
+
+// 具体实现示例
+export class TrendAnalysisProcessor extends BaseAnalysisProcessor {
+  static async processTrendAnalysis(
+    coreService: CoreTechnicalAnalysisService,
+    symbol: string
+  ): Promise<string> {
+    return this.executeAnalysis(coreService, symbol, (coreData) => {
+      return TrendAnalysisFormatter.formatMessage(symbol, coreData.trendAnalysis);
+    });
+  }
+}
+```
+
+### 2. 格式化器继承模式
+```typescript
+/**
+ * 技术分析格式化器基类
+ */
+export abstract class BaseAnalysisFormatter {
+  /**
+   * 统一的价格格式化
+   */
+  protected static formatPrice(price: number): string {
+    return FormatUtil.formatPrice(price);
+  }
+
+  /**
+   * 统一的时间格式化
+   */
+  protected static formatTime(): string {
+    return FormatUtil.formatTime();
+  }
+
+  /**
+   * 统一的精确交易区间格式化
+   */
+  protected static formatPreciseTradingZones(
+    buyZones: any[], 
+    sellZones: any[]
+  ): string {
+    let message = '';
+
+    if (buyZones.length > 0) {
+      message += `\n💚 <b>精确买入区间:</b>\n`;
+      buyZones.forEach((zone: any) => {
+        message += `• $${this.formatPrice(zone.entry)} (±$${this.formatPrice(zone.tolerance)}) [${zone.confidence}%]\n`;
+      });
+    }
+
+    if (sellZones.length > 0) {
+      message += `\n🔴 <b>精确卖出区间:</b>\n`;
+      sellZones.forEach((zone: any) => {
+        message += `• $${this.formatPrice(zone.entry)} (±$${this.formatPrice(zone.tolerance)}) [${zone.confidence}%]\n`;
+      });
+    }
+
+    return message;
+  }
+}
+```
+
+## 📈 EMA和趋势分析规范
+
+### 1. EMA数据获取标准
+```typescript
+// ✅ 正确：使用标准EMA参数和数据量
+export class EMAAnalysisUtil {
+  // 标准EMA周期
+  static readonly STANDARD_EMA_PERIODS = [20, 60, 120];
+  
+  // 标准数据量 (约4-5个月数据)
+  static readonly STANDARD_KLINE_COUNT = 100;
+  
+  // 标准时间周期
+  static readonly STANDARD_TIMEFRAME = '1d';
+
+  static async getStandardEMAData(
+    emaService: EMAAnalysisService,
+    symbol: string
+  ): Promise<{ analysis: any; detailedData: any }> {
+    const [analysis, detailedData] = await Promise.all([
+      emaService.analyzeEMA(symbol, this.STANDARD_TIMEFRAME, this.STANDARD_EMA_PERIODS),
+      emaService.getDetailedEMAData(symbol, this.STANDARD_TIMEFRAME, this.STANDARD_EMA_PERIODS, this.STANDARD_KLINE_COUNT)
+    ]);
+
+    return { analysis, detailedData };
+  }
+}
+```
+
+### 2. 多时间周期分析规范
+```typescript
+// 标准的多时间周期配置
+export class MultiTimeframeUtil {
+  // 标准时间周期
+  static readonly STANDARD_TIMEFRAMES = ['15m', '1h', '4h', '1d'];
+  
+  // 时间周期优先级 (用于冲突解决)
+  static readonly TIMEFRAME_PRIORITY = {
+    '1d': 4,   // 最高优先级
+    '4h': 3,
+    '1h': 2,
+    '15m': 1   // 最低优先级
+  };
+
+  /**
+   * 标准的趋势一致性分析
+   */
+  static analyzeTrendConsistency(timeframeData: any): {
+    isAligned: boolean;
+    alignmentScore: number;
+    conflictingTimeframes: string[];
+  } {
+    // 标准的一致性计算逻辑
+    // 必须与核心服务保持一致
+  }
+}
+```
+
+## 🎯 支撑阻力位分析规范
+
+### 1. 支撑阻力位识别标准
+```typescript
+export class SupportResistanceUtil {
+  // 标准强度分类
+  static readonly STRENGTH_LEVELS = {
+    MAJOR: 'MAJOR',
+    STRONG: 'STRONG', 
+    MEDIUM: 'MEDIUM',
+    WEAK: 'WEAK'
+  };
+
+  // 标准置信度阈值
+  static readonly CONFIDENCE_THRESHOLDS = {
+    HIGH: 80,
+    MEDIUM: 60,
+    LOW: 40
+  };
+
+  /**
+   * 标准的支撑阻力位过滤
+   */
+  static filterValidLevels(levels: any[]): any[] {
+    return levels.filter(level => 
+      level.confidence >= this.CONFIDENCE_THRESHOLDS.LOW &&
+      level.strength !== this.STRENGTH_LEVELS.WEAK
+    );
+  }
+
+  /**
+   * 标准的精确交易区间计算
+   */
+  static calculatePreciseZones(
+    levels: any[], 
+    currentPrice: number,
+    type: 'buy' | 'sell'
+  ): any[] {
+    const baseTolerancePercent = 0.005; // 0.5% - 与核心服务保持一致
+    const baseTolerance = currentPrice * baseTolerancePercent;
+
+    return levels
+      .filter(level => this.isValidLevel(level, type))
+      .slice(0, 3) // 最多3个区间
+      .map(level => ({
+        entry: level.priceRange.center,
+        tolerance: Math.min(baseTolerance, Math.abs(level.priceRange.max - level.priceRange.min) / 4),
+        confidence: level.confidence,
+        reason: `${level.timeframe}级别${level.strength}${type === 'buy' ? '支撑' : '阻力'}位`
+      }));
+  }
+}
+```
+
+## 🔍 质量检查清单
+
+在开发技术分析相关功能时，必须检查：
+
+### 数据一致性检查
+- [ ] 是否使用 `CoreTechnicalAnalysisService` 作为数据源？
+- [ ] 是否与完整技术分析的计算结果一致？
+- [ ] 精确交易区间格式是否统一？
+
+### 技术规范检查
+- [ ] EMA参数是否使用标准配置 (20, 60, 120)？
+- [ ] 是否使用标准的100根K线数据量？
+- [ ] 多时间周期是否使用标准配置 (15m, 1h, 4h, 1d)？
+
+### 格式化规范检查
+- [ ] 是否使用统一的格式化工具？
+- [ ] 价格格式是否一致？
+- [ ] 表情符号是否使用统一的工具类？
+
+### 错误处理检查
+- [ ] 是否有完整的错误处理？
+- [ ] 是否有适当的日志记录？
+- [ ] 是否提供用户友好的错误信息？
+
+## 🚀 最佳实践示例
+
+参考以下成功实现：
+- [CoreTechnicalAnalysisService](mdc:src/modules/technical-analysis/services/core-technical-analysis.service.ts) - 核心数据服务
+- [ComprehensiveAnalysisFormatter](mdc:src/modules/telegram-ccxt-analysis/utils/formatters/comprehensive-analysis.formatter.ts) - 标准格式化器
+- [AnalysisProcessorUtil](mdc:src/modules/telegram-ccxt-analysis/utils/analysis/analysis-processor.util.ts) - 分析处理器模式
+description:
+globs:
+alwaysApply: false
+---

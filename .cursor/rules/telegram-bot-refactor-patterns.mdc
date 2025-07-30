@@ -1,0 +1,221 @@
+# Telegram Bot重构模式和架构规范
+
+## 📁 目录结构规范
+
+当修改或扩展Telegram Bot功能时，必须遵循以下目录结构：
+
+```
+src/modules/telegram-ccxt-analysis/
+├── services/
+│   └── telegram-ccxt-analysis.service.ts     # 主服务 (精简版)
+├── utils/                                     # 工具包 (核心)
+│   ├── interfaces/                            # 类型定义
+│   ├── emoji/                                 # 表情符号工具
+│   ├── formatters/                            # 消息格式化器
+│   ├── templates/                             # 菜单模板
+│   ├── bot/                                   # Bot管理工具
+│   ├── analysis/                              # 分析处理器
+│   ├── commands/                              # 命令处理器 (可扩展)
+│   ├── index.ts                               # 统一导出
+│   └── README.md                              # 使用文档
+└── controller, module等其他文件
+```
+
+## 🔧 模块化设计原则
+
+### 1. 单一职责原则
+- 每个文件只负责一个特定功能
+- 工具类使用静态方法，便于直接调用
+- 格式化器与业务逻辑完全分离
+
+### 2. 依赖注入规范
+```typescript
+// ✅ 正确：通过参数传入依赖
+static async performAnalysis(
+  coreTechnicalAnalysisService: CoreTechnicalAnalysisService,
+  symbol: string
+): Promise<string> { ... }
+
+// ❌ 错误：在工具类中注入依赖
+@Injectable()
+class SomeUtil { ... }
+```
+
+### 3. 导入导出规范
+```typescript
+// ✅ 正确：使用统一的工具包导入
+import {
+  BotManagerUtil,
+  AnalysisProcessorUtil,
+  ComprehensiveAnalysisFormatter,
+  MenuTemplate,
+  EmojiUtil
+} from '../utils';
+
+// ❌ 错误：直接导入具体文件
+import { BotManagerUtil } from '../utils/bot/bot-manager.util';
+```
+
+## 📝 代码组织规范
+
+### 1. 接口定义
+所有接口必须在 `utils/interfaces/` 中定义：
+```typescript
+// utils/interfaces/telegram.interface.ts
+export interface TelegramConfig { ... }
+export interface UserState { ... }
+export enum AnalysisType { ... }
+```
+
+### 2. 格式化器规范
+每种分析类型必须有对应的格式化器：
+```typescript
+// utils/formatters/[analysis-type].formatter.ts
+export class [AnalysisType]Formatter {
+  static formatMessage(symbol: string, analysis: any): string {
+    // 格式化逻辑
+  }
+}
+```
+
+### 3. 模板管理
+所有菜单模板集中管理：
+```typescript
+// utils/templates/menu.template.ts
+export class MenuTemplate {
+  static getMainMenu(): string { ... }
+  static getAnalysisTypeMenu(): any { ... }
+  static getSymbolSelectionMenu(type: AnalysisType): any { ... }
+}
+```
+
+## 🚀 扩展新功能规范
+
+### 添加新分析类型的步骤：
+
+1. **更新枚举定义**
+```typescript
+// utils/interfaces/telegram.interface.ts
+export enum AnalysisType {
+  COMPREHENSIVE = 'comprehensive',
+  TREND = 'trend',
+  SUPPORT_RESISTANCE = 'support_resistance',
+  NEW_ANALYSIS = 'new_analysis'  // 新增
+}
+```
+
+2. **创建格式化器**
+```typescript
+// utils/formatters/new-analysis.formatter.ts
+export class NewAnalysisFormatter {
+  static formatMessage(symbol: string, analysis: any): string {
+    return `新分析结果：${symbol}...`;
+  }
+}
+```
+
+3. **更新分析处理器**
+```typescript
+// utils/analysis/analysis-processor.util.ts
+static async performNewAnalysis(
+  coreTechnicalAnalysisService: CoreTechnicalAnalysisService,
+  symbol: string
+): Promise<string> {
+  // 分析逻辑
+}
+```
+
+4. **更新菜单模板**
+```typescript
+// utils/templates/menu.template.ts
+static getAnalysisTypeMenu(): any {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        // 现有选项...
+        [{ text: '🆕 新分析', callback_data: 'symbols_list:new_analysis' }]
+      ]
+    }
+  };
+}
+```
+
+## 🔍 代码质量要求
+
+### 1. 类型安全
+- 所有方法必须有明确的类型定义
+- 避免使用 `any` 类型，优先使用具体接口
+- 使用枚举替代字符串常量
+
+### 2. 错误处理
+```typescript
+// ✅ 正确：统一的错误处理模式
+try {
+  const result = await someOperation();
+  return result;
+} catch (error) {
+  this.logger.error(`操作失败 ${symbol}:`, error);
+  throw new Error(`操作失败: ${error.message}`);
+}
+```
+
+### 3. 日志记录
+```typescript
+// ✅ 正确：关键操作必须记录日志
+static async performAnalysis(...): Promise<string> {
+  this.logger.log(`开始执行 ${symbol} 分析`);
+  // 业务逻辑
+  this.logger.log(`${symbol} 分析完成`);
+  return result;
+}
+```
+
+## 📚 文档要求
+
+### 1. 每个工具类必须有详细注释
+```typescript
+/**
+ * 分析处理器工具类
+ * 负责执行各种技术分析并格式化结果
+ */
+export class AnalysisProcessorUtil {
+  /**
+   * 执行完整技术分析
+   * @param coreTechnicalAnalysisService 核心技术分析服务
+   * @param symbol 交易对符号
+   * @returns 格式化的分析消息
+   */
+  static async performComprehensiveAnalysis(...): Promise<string> { ... }
+}
+```
+
+### 2. README文档必须保持最新
+- 添加新功能时必须更新 `utils/README.md`
+- 包含使用示例和API说明
+- 记录依赖关系和扩展方法
+
+## ⚠️ 禁止事项
+
+1. **不要在工具类中使用依赖注入** - 保持工具类的纯净性
+2. **不要混合业务逻辑和格式化逻辑** - 严格分离关注点
+3. **不要硬编码配置和常量** - 使用配置文件和枚举
+4. **不要创建超过400行的文件** - 及时拆分大文件
+5. **不要破坏现有API接口** - 保持向后兼容性
+
+## 🔄 重构检查清单
+
+在修改Telegram Bot相关代码时，请检查：
+
+- [ ] 是否遵循单一职责原则？
+- [ ] 是否使用了正确的目录结构？
+- [ ] 是否有适当的类型定义？
+- [ ] 是否包含错误处理和日志记录？
+- [ ] 是否更新了相关文档？
+- [ ] 是否保持了API的向后兼容性？
+- [ ] 是否添加了必要的测试？
+
+参考重构示例：[telegram-ccxt-analysis.service.ts](mdc:src/modules/telegram-ccxt-analysis/services/telegram-ccxt-analysis.service.ts) 和 [utils目录](mdc:src/modules/telegram-ccxt-analysis/utils)
+description:
+globs:
+alwaysApply: false
+---

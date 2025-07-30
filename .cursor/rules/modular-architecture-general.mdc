@@ -1,0 +1,294 @@
+# 模块化架构和重构通用规范
+
+## 🎯 核心重构原则
+
+### 1. 文件大小限制
+- **单个文件不超过 500 行** - 超过时必须拆分
+- **类/服务不超过 400 行** - 优先按功能拆分
+- **工具类文件不超过 300 行** - 保持工具类精简
+
+### 2. 单一职责原则 (SRP)
+```typescript
+// ✅ 正确：专门的格式化器
+export class MessageFormatter {
+  static formatPrice(price: number): string { ... }
+  static formatTime(): string { ... }
+}
+
+// ✅ 正确：专门的分析处理器
+export class AnalysisProcessor {
+  static async performAnalysis(): Promise<string> { ... }
+}
+
+// ❌ 错误：混合多种职责
+export class MixedService {
+  formatMessage() { ... }      // 格式化
+  performAnalysis() { ... }    // 分析
+  sendNotification() { ... }   // 通知
+}
+```
+
+### 3. 依赖倒置原则 (DIP)
+```typescript
+// ✅ 正确：通过参数传入依赖
+static async processData(
+  dataService: DataService,
+  symbol: string
+): Promise<Result> {
+  return await dataService.getData(symbol);
+}
+
+// ❌ 错误：直接依赖具体实现
+static async processData(symbol: string): Promise<Result> {
+  const dataService = new ConcreteDataService(); // 硬依赖
+  return await dataService.getData(symbol);
+}
+```
+
+## 📁 标准目录结构模式
+
+### 1. 功能模块标准结构
+```
+src/modules/[module-name]/
+├── services/           # 业务逻辑服务
+├── controllers/        # API控制器
+├── dto/               # 数据传输对象
+├── entities/          # 数据实体
+├── interfaces/        # 接口定义
+├── utils/             # 工具包 (核心重构区域)
+│   ├── interfaces/    # 类型定义
+│   ├── formatters/    # 格式化器
+│   ├── templates/     # 模板
+│   ├── processors/    # 处理器
+│   ├── validators/    # 验证器
+│   ├── index.ts       # 统一导出
+│   └── README.md      # 使用文档
+├── [module].module.ts # 模块定义
+└── README.md          # 模块文档
+```
+
+### 2. Utils工具包组织规范
+```typescript
+// utils/index.ts - 统一导出入口
+export * from './interfaces';
+export * from './formatters';
+export * from './templates';
+export * from './processors';
+export * from './validators';
+
+// 使用时统一从utils导入
+import { 
+  SomeFormatter, 
+  SomeProcessor, 
+  SomeInterface 
+} from '../utils';
+```
+
+## 🔧 工具类设计规范
+
+### 1. 静态工具类模式
+```typescript
+/**
+ * 静态工具类模板
+ * - 所有方法都是静态的
+ * - 不使用依赖注入
+ * - 通过参数传入所有依赖
+ */
+export class UtilityClass {
+  private static readonly logger = new Logger(UtilityClass.name);
+
+  /**
+   * 核心方法模板
+   */
+  static async performOperation(
+    dependency: SomeService,
+    input: InputType
+  ): Promise<OutputType> {
+    try {
+      this.logger.log(`开始执行操作: ${input}`);
+      const result = await dependency.process(input);
+      this.logger.log(`操作完成: ${input}`);
+      return result;
+    } catch (error) {
+      this.logger.error(`操作失败: ${error.message}`);
+      throw new Error(`操作失败: ${error.message}`);
+    }
+  }
+}
+```
+
+### 2. 格式化器模式
+```typescript
+// 专门的格式化器，职责单一
+export class DataFormatter {
+  static formatPrice(price: number): string { ... }
+  static formatDate(date: Date): string { ... }
+  static formatPercentage(value: number): string { ... }
+}
+
+// 特定业务的格式化器
+export class AnalysisFormatter {
+  static formatAnalysisResult(data: AnalysisData): string { ... }
+  static formatRecommendation(rec: Recommendation): string { ... }
+}
+```
+
+### 3. 处理器模式
+```typescript
+// 专门的业务处理器
+export class BusinessProcessor {
+  static async processBusinessLogic(
+    coreService: CoreService,
+    input: InputData
+  ): Promise<ProcessedData> {
+    // 处理逻辑
+  }
+  
+  static validateInput(input: InputData): boolean { ... }
+  static transformOutput(data: RawData): ProcessedData { ... }
+}
+```
+
+## 📝 代码质量标准
+
+### 1. TypeScript 严格类型
+```typescript
+// ✅ 正确：明确的类型定义
+interface AnalysisRequest {
+  symbol: string;
+  timeframe: TimeframeType;
+  analysisType: AnalysisType;
+}
+
+// ✅ 正确：泛型使用
+static async processData<T, R>(
+  processor: (input: T) => Promise<R>,
+  data: T[]
+): Promise<R[]> { ... }
+
+// ❌ 错误：过度使用any
+static async processData(processor: any, data: any): Promise<any> { ... }
+```
+
+### 2. 错误处理标准
+```typescript
+// ✅ 正确：标准错误处理模式
+static async reliableOperation(input: InputType): Promise<OutputType> {
+  try {
+    // 输入验证
+    if (!this.validateInput(input)) {
+      throw new Error('输入参数无效');
+    }
+
+    // 核心逻辑
+    const result = await this.performCoreLogic(input);
+    
+    // 结果验证
+    if (!this.validateOutput(result)) {
+      throw new Error('输出结果无效');
+    }
+
+    return result;
+  } catch (error) {
+    this.logger.error(`操作失败: ${error.message}`, error.stack);
+    throw new Error(`操作失败: ${error.message}`);
+  }
+}
+```
+
+### 3. 日志记录规范
+```typescript
+export class SomeProcessor {
+  private static readonly logger = new Logger(SomeProcessor.name);
+
+  static async performTask(input: string): Promise<string> {
+    // 开始日志
+    this.logger.log(`开始执行任务: ${input}`);
+    
+    try {
+      const result = await this.processInput(input);
+      
+      // 成功日志
+      this.logger.log(`任务完成: ${input} -> ${result}`);
+      return result;
+    } catch (error) {
+      // 错误日志
+      this.logger.error(`任务失败 ${input}: ${error.message}`);
+      throw error;
+    }
+  }
+}
+```
+
+## 🚀 重构实施流程
+
+### 1. 分析阶段
+- [ ] 识别超大文件 (>500行)
+- [ ] 分析功能职责边界
+- [ ] 确定拆分策略
+- [ ] 设计工具包结构
+
+### 2. 设计阶段
+- [ ] 创建接口和类型定义
+- [ ] 设计工具类API
+- [ ] 规划依赖关系
+- [ ] 制定迁移计划
+
+### 3. 实施阶段
+- [ ] 创建utils目录结构
+- [ ] 逐步抽离功能模块
+- [ ] 保持API兼容性
+- [ ] 编写单元测试
+
+### 4. 验证阶段
+- [ ] 功能测试通过
+- [ ] 编译无错误
+- [ ] 性能无回退
+- [ ] 文档更新完整
+
+## 📚 文档化要求
+
+### 1. 工具类文档模板
+```typescript
+/**
+ * [工具类名称]
+ * [简要功能描述]
+ * 
+ * @example
+ * ```typescript
+ * const result = await UtilClass.method(param1, param2);
+ * console.log(result);
+ * ```
+ */
+export class UtilClass {
+  /**
+   * [方法功能描述]
+   * 
+   * @param param1 参数1说明
+   * @param param2 参数2说明
+   * @returns 返回值说明
+   * @throws 异常情况说明
+   */
+  static async method(param1: Type1, param2: Type2): Promise<ReturnType> { ... }
+}
+```
+
+### 2. README更新要求
+- 添加新工具类时必须更新README
+- 包含完整的使用示例
+- 说明依赖关系和扩展方法
+- 提供故障排除指南
+
+## ⚠️ 重构反模式（禁止）
+
+1. **上帝类** - 单个类承担过多职责
+2. **硬编码依赖** - 在工具类中直接new实例
+3. **混合抽象层级** - 在同一个文件中混合高低层逻辑
+4. **循环依赖** - 工具类之间相互依赖
+5. **配置散乱** - 配置和常量散布在各个文件中
+
+参考成功重构案例：[Telegram Bot重构](mdc:src/modules/telegram-ccxt-analysis/utils/README.md)
+description:
+globs:
+alwaysApply: false
+---
