@@ -22,12 +22,13 @@ export class ScheduledAnalysisService {
   ) {}
 
   /**
-   * 每1分钟执行一次完整技术分析
-   * 定时任务：每1分钟的第0秒执行
+   * 每10秒执行一次完整技术分析
+   * 定时任务：每10秒执行
    */
 
-  // @Cron('0 */15 * * * *', {
-  @Cron('0 */1 * * * *', {
+  @Cron('0 */15 * * * *', {  // 原来的15分钟
+  // @Cron('0 */1 * * * *', {   // 之前的1分钟
+  // @Cron('*/10 * * * * *', {
     name: 'scheduled-technical-analysis',
     timeZone: 'Asia/Shanghai',
   })
@@ -46,6 +47,12 @@ export class ScheduledAnalysisService {
       // 获取所有活跃的交易对配置
       const activeConfigs = await this.coinConfigService.findActiveConfigs();
       this.logger.log(`发现 ${activeConfigs.length} 个活跃的交易对配置`);
+      
+      // 详细列出所有要处理的交易对
+      if (activeConfigs.length > 0) {
+        const symbolsList = activeConfigs.map(config => `${config.symbol}(${config.interval})`).join(', ');
+        this.logger.log(`即将分析的交易对: ${symbolsList}`);
+      }
 
       if (activeConfigs.length === 0) {
         this.logger.warn('没有发现活跃的交易对配置');
@@ -53,9 +60,10 @@ export class ScheduledAnalysisService {
       }
 
       // 并行执行技术分析
-      const analysisPromises = activeConfigs.map(config =>
-        this.analyzeSymbol(config.symbol, config.interval)
-      );
+      const analysisPromises = activeConfigs.map((config, index) => {
+        this.logger.log(`[${index + 1}/${activeConfigs.length}] 开始分析 ${config.symbol}(${config.interval})`);
+        return this.analyzeSymbol(config.symbol, config.interval);
+      });
 
       const results = await Promise.allSettled(analysisPromises);
       
@@ -68,13 +76,13 @@ export class ScheduledAnalysisService {
         `定时技术分析完成: 成功 ${successful}，失败 ${failed}，耗时 ${duration}ms`
       );
 
-      // 记录失败的分析
+      // 记录每个token的详细结果
       results.forEach((result, index) => {
-        if (result.status === 'rejected') {
-          const config = activeConfigs[index];
-          this.logger.error(
-            `分析失败 ${config.symbol}(${config.interval}): ${result.reason}`
-          );
+        const config = activeConfigs[index];
+        if (result.status === 'fulfilled') {
+          this.logger.log(`✅ ${config.symbol}(${config.interval}) 处理成功`);
+        } else {
+          this.logger.error(`❌ ${config.symbol}(${config.interval}) 处理失败: ${result.reason}`);
         }
       });
 
@@ -90,7 +98,7 @@ export class ScheduledAnalysisService {
    */
   private async analyzeSymbol(symbol: string, interval: string): Promise<void> {
     try {
-      this.logger.debug(`开始分析 ${symbol}(${interval})`);
+      this.logger.log(`📊 开始分析 ${symbol}(${interval})`);
 
       // 执行核心技术分析
       const analysisResult = await this.coreTechnicalAnalysisService.performComprehensiveAnalysis(
@@ -135,10 +143,10 @@ export class ScheduledAnalysisService {
         },
       });
 
-      this.logger.debug(`分析完成并存储: ${symbol}(${interval})`);
+      this.logger.log(`✅ 分析完成并存储: ${symbol}(${interval})`);
 
     } catch (error) {
-      this.logger.error(`分析 ${symbol}(${interval}) 失败: ${error.message}`);
+      this.logger.error(`❌ 分析 ${symbol}(${interval}) 失败: ${error.message}`);
       throw error;
     }
   }

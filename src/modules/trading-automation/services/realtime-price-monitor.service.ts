@@ -70,12 +70,19 @@ export class RealtimePriceMonitorService implements OnModuleInit, OnModuleDestro
     try {
       // 获取所有活跃的交易对
       const activeConfigs = await this.coinConfigService.findActiveConfigs();
+      this.logger.log(`发现 ${activeConfigs.length} 个活跃的交易对配置`);
       
-      for (const config of activeConfigs) {
-        await this.addSymbolToMonitor(config.symbol);
-      }
+      // 并行添加所有交易对到监控（不等待监控任务完成）
+      const addPromises = activeConfigs.map(config => 
+        this.addSymbolToMonitor(config.symbol).catch(error => {
+          this.logger.error(`添加 ${config.symbol} 到监控失败: ${error.message}`);
+        })
+      );
 
-      this.logger.log(`开始监控 ${this.monitoredSymbols.size} 个交易对的实时价格`);
+      // 等待所有添加操作完成（但不等待监控任务）
+      await Promise.allSettled(addPromises);
+
+      this.logger.log(`成功启动 ${this.monitoredSymbols.size} 个交易对的实时价格监控`);
       
     } catch (error) {
       this.logger.error(`启动价格监控失败: ${error.message}`);
@@ -94,14 +101,18 @@ export class RealtimePriceMonitorService implements OnModuleInit, OnModuleDestro
 
     try {
       this.monitoredSymbols.add(symbol);
-      this.logger.log(`添加 ${symbol} 到价格监控`);
+      this.logger.log(`📈 添加 ${symbol} 到价格监控`);
       
-      // 启动该交易对的价格监控
-      await this.watchSymbolPrice(symbol);
+      // 启动该交易对的价格监控（不等待，作为后台任务运行）
+      this.watchSymbolPrice(symbol).catch(error => {
+        this.logger.error(`${symbol} 价格监控任务异常结束: ${error.message}`);
+        this.monitoredSymbols.delete(symbol);
+      });
       
     } catch (error) {
       this.logger.error(`添加 ${symbol} 到监控失败: ${error.message}`);
       this.monitoredSymbols.delete(symbol);
+      throw error;
     }
   }
 
@@ -124,6 +135,8 @@ export class RealtimePriceMonitorService implements OnModuleInit, OnModuleDestro
     if (!this.exchange) {
       throw new Error('交易所未初始化');
     }
+
+    this.logger.log(`🔄 开始监控 ${symbol} 的价格变动`);
 
     try {
       // 使用定时轮询的方式获取价格，因为Binance的watchTicker不支持
@@ -152,8 +165,11 @@ export class RealtimePriceMonitorService implements OnModuleInit, OnModuleDestro
         }
       }
       
+      this.logger.log(`⏹️ 停止监控 ${symbol} 的价格变动`);
+      
     } catch (error) {
       this.logger.error(`启动 ${symbol} 价格监控失败: ${error.message}`);
+      this.monitoredSymbols.delete(symbol);
     }
   }
 
@@ -164,7 +180,7 @@ export class RealtimePriceMonitorService implements OnModuleInit, OnModuleDestro
     const previousPrice = this.latestPrices.get(symbol);
     this.latestPrices.set(symbol, price);
 
-    // this.logger.debug(`${symbol} 价格更新: ${price}`);
+    this.logger.debug(`${symbol} 价格更新: ${price}`);
 
     try {
       // 检查价格触发条件
