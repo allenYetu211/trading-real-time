@@ -95,6 +95,29 @@ export class MenuTemplate {
   }
 
   /**
+   * 获取主菜单键盘
+   */
+  static getMainMenuKeyboard(): any {
+    return {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '📊 开始分析', callback_data: 'analysis_menu' },
+            { text: '⚙️ 交易对管理', callback_data: 'manage_symbols' },
+          ],
+          [
+            { text: '📋 查看关注列表', callback_data: 'view_watchlist' },
+            { text: '❓ 帮助', callback_data: 'help_menu' },
+          ],
+          [
+            { text: '🔍 机器人状态', callback_data: 'bot_status' },
+          ]
+        ]
+      }
+    };
+  }
+
+  /**
    * 获取分析类型选择菜单
    */
   static getAnalysisTypeMenu(): any {
@@ -114,7 +137,32 @@ export class MenuTemplate {
           // ],
           [
             { text: '🔍 完整技术分析', callback_data: 'symbols_list:comprehensive' },
-            { text: '🏠 返回主菜单', callback_data: 'main_menu' },
+          ],
+          [
+            { text: '🔙 返回主菜单', callback_data: 'main_menu' },
+          ]
+        ]
+      }
+    };
+  }
+
+  /**
+   * 获取交易对管理菜单
+   */
+  static getSymbolManagementMenu(): any {
+    return {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '📋 查看关注列表', callback_data: 'view_watchlist' },
+            { text: '➕ 添加交易对', callback_data: 'add_symbol' },
+          ],
+          [
+            { text: '➖ 移除交易对', callback_data: 'remove_symbol' },
+          ],
+          [
+            { text: '🔙 返回分析选择', callback_data: 'analysis_menu' },
+            { text: '🏠 主菜单', callback_data: 'main_menu' }
           ]
         ]
       }

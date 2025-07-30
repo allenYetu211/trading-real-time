@@ -8,6 +8,7 @@ import {
   BotStatus,
   CommandHandler,
   CallbackQueryHandler,
+  MessageHandler,
 } from './interfaces';
 import { BotConnectionStatus } from './enums';
 
@@ -23,6 +24,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   private connectionStatus: BotConnectionStatus = BotConnectionStatus.DISCONNECTED;
   private commandHandlers = new Map<string, CommandHandler>();
   private callbackQueryHandlers: CallbackQueryHandler[] = [];
+  private messageHandlers: MessageHandler[] = [];
   private startTime: number = Date.now();
   private lastError: string | null = null;
 
@@ -131,6 +133,18 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
           await handler.handler(msg);
         } catch (error) {
           this.logger.error(`处理命令 ${command} 失败: ${error.message}`);
+        }
+      }
+    } else {
+      // 处理非命令消息
+      for (const messageHandler of this.messageHandlers) {
+        try {
+          const handled = await messageHandler.handler(msg);
+          if (handled) {
+            break; // 如果消息被处理，则停止尝试其他处理器
+          }
+        } catch (error) {
+          this.logger.error(`消息处理器错误: ${error.message}`);
         }
       }
     }
@@ -281,6 +295,40 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
    */
   registerCallbackQueryHandlers(handlers: CallbackQueryHandler[]): void {
     handlers.forEach(handler => this.registerCallbackQueryHandler(handler));
+  }
+
+  /**
+   * 注册消息处理器
+   */
+  registerMessageHandler(handler: MessageHandler): void {
+    this.messageHandlers.push(handler);
+    this.logger.debug(`注册消息处理器: ${handler.description}`);
+  }
+
+  /**
+   * 批量注册消息处理器
+   */
+  registerMessageHandlers(handlers: MessageHandler[]): void {
+    handlers.forEach(handler => this.registerMessageHandler(handler));
+  }
+
+  /**
+   * 设置 Bot 命令菜单
+   */
+  async setBotCommands(commands: Array<{command: string, description: string}>): Promise<boolean> {
+    if (!this.bot) {
+      this.logger.warn('Bot 未初始化，无法设置命令');
+      return false;
+    }
+
+    try {
+      await this.bot.setMyCommands(commands);
+      this.logger.log(`成功设置 ${commands.length} 个 Bot 命令`);
+      return true;
+    } catch (error) {
+      this.logger.error(`设置 Bot 命令失败: ${error.message}`);
+      return false;
+    }
   }
 
   /**

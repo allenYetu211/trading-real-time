@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { TelegramBotService, CommandHandler, CallbackQueryHandler } from 'src/modules/telegram-bot';
+import { TelegramBotService, CommandHandler, CallbackQueryHandler, MessageHandler } from 'src/modules/telegram-bot';
 import * as TelegramBot from 'node-telegram-bot-api';
 
 // 核心服务依赖
@@ -71,6 +71,8 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
 
     this.setupCommandHandlers();
     this.setupCallbackQueryHandlers();
+    this.setupMessageHandlers();
+    await this.setupBotCommands();
     await this.initializeMenus();
     this.logger.log('Telegram CCXT 分析命令处理器初始化成功');
   }
@@ -132,12 +134,43 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
   private async handleAddCommandWithMessage(msg: TelegramBot.Message): Promise<void> {
     const text = msg.text || '';
     const chatId = msg.chat.id;
+    const userId = msg.from?.id?.toString() || chatId.toString();
     
     if (text.startsWith('/add ')) {
+      // 直接模式：/add SYMBOL
       const symbol = text.substring(5).trim().toUpperCase();
       await this.handleAddCommand(chatId, symbol);
+    } else if (text === '/add') {
+      // 分步模式：设置用户状态等待输入
+      this.userStates.set(userId, {
+        action: 'waiting_for_add_symbol',
+        timestamp: Date.now()
+      });
+
+      await this.sendMessage(chatId, `
+➕ <b>添加交易对</b>
+
+请输入您要添加的交易对符号：
+
+💡 <b>示例：</b>
+• BTCUSDT
+• ETHUSDT  
+• SOLUSDT
+
+📝 <i>直接发送交易对符号即可</i>
+      `.trim(), { parse_mode: 'HTML' });
     } else {
-      await this.sendMessage(chatId, '请使用格式: /add SYMBOL\n例如: /add BTC/USDT');
+      await this.sendMessage(chatId, `
+❌ <b>格式错误</b>
+
+请使用正确的格式：
+
+💡 <b>方式一（直接模式）：</b>
+<code>/add BTCUSDT</code>
+
+💡 <b>方式二（分步模式）：</b>
+先发送 <code>/add</code>，然后输入交易对符号
+      `.trim(), { parse_mode: 'HTML' });
     }
   }
 
@@ -147,12 +180,27 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
   private async handleRemoveCommandWithMessage(msg: TelegramBot.Message): Promise<void> {
     const text = msg.text || '';
     const chatId = msg.chat.id;
+    const userId = msg.from?.id?.toString() || chatId.toString();
     
     if (text.startsWith('/remove ')) {
+      // 直接模式：/remove SYMBOL
       const symbol = text.substring(8).trim().toUpperCase();
       await this.handleRemoveCommand(chatId, symbol);
+    } else if (text === '/remove') {
+      // 分步模式：设置用户状态等待输入
+      await this.handleRemoveSymbolCallback(chatId, userId);
     } else {
-      await this.sendMessage(chatId, '请使用格式: /remove SYMBOL\n例如: /remove BTC/USDT');
+      await this.sendMessage(chatId, `
+❌ <b>格式错误</b>
+
+请使用正确的格式：
+
+💡 <b>方式一（直接模式）：</b>
+<code>/remove BTCUSDT</code>
+
+💡 <b>方式二（分步模式）：</b>
+先发送 <code>/remove</code>，然后输入交易对符号
+      `.trim(), { parse_mode: 'HTML' });
     }
   }
 
@@ -204,10 +252,231 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
           }
         },
       },
+      {
+        pattern: 'manage_symbols',
+        description: '管理交易对',
+        handler: async (query) => {
+          const chatId = query.message?.chat.id;
+          if (chatId) {
+            await this.showSymbolManagementMenu(chatId);
+          }
+        },
+      },
+      {
+        pattern: 'view_watchlist',
+        description: '查看关注列表',
+        handler: async (query) => {
+          const chatId = query.message?.chat.id;
+          if (chatId) {
+            await this.handleListCommand(chatId);
+          }
+        },
+      },
+      {
+        pattern: 'add_symbol',
+        description: '添加交易对',
+        handler: async (query) => {
+          const chatId = query.message?.chat.id;
+          const userId = query.from?.id?.toString() || chatId.toString();
+          if (chatId) {
+            await this.handleAddSymbolCallback(chatId, userId);
+          }
+        },
+      },
+      {
+        pattern: 'remove_symbol',
+        description: '移除交易对',
+        handler: async (query) => {
+          const chatId = query.message?.chat.id;
+          const userId = query.from?.id?.toString() || chatId.toString();
+          if (chatId) {
+            await this.handleRemoveSymbolCallback(chatId, userId);
+          }
+        },
+      },
+      {
+        pattern: 'help_menu',
+        description: '帮助菜单',
+        handler: async (query) => {
+          const chatId = query.message?.chat.id;
+          if (chatId) {
+            await this.handleHelpCommand(chatId);
+          }
+        },
+      },
+      {
+        pattern: 'bot_status',
+        description: '机器人状态',
+        handler: async (query) => {
+          const chatId = query.message?.chat.id;
+          if (chatId) {
+            await this.handleStatusCommand(chatId);
+          }
+        },
+      },
     ];
 
     // 注册所有回调查询处理器
     this.telegramBotService.registerCallbackQueryHandlers(callbackHandlers);
+  }
+
+  /**
+   * 设置消息处理器
+   */
+  private setupMessageHandlers(): void {
+    const messageHandlers: MessageHandler[] = [
+      {
+        description: '用户状态消息处理器',
+        handler: (msg) => this.handleUserStateMessage(msg),
+      },
+    ];
+
+    // 注册所有消息处理器
+    this.telegramBotService.registerMessageHandlers(messageHandlers);
+  }
+
+  /**
+   * 设置 Bot 命令菜单
+   */
+  private async setupBotCommands(): Promise<void> {
+    const commands = [
+      {
+        command: 'start',
+        description: '启动机器人并显示主菜单'
+      },
+      {
+        command: 'help',
+        description: '显示帮助信息'
+      },
+      {
+        command: 'technical',
+        description: '完整技术分析'
+      },
+      {
+        command: 'list',
+        description: '查看关注列表'
+      },
+      {
+        command: 'add',
+        description: '添加交易对到关注列表'
+      },
+      {
+        command: 'remove',
+        description: '从关注列表移除交易对'
+      },
+      {
+        command: 'status',
+        description: '查看机器人状态'
+      }
+    ];
+
+    const success = await this.telegramBotService.setBotCommands(commands);
+    if (success) {
+      this.logger.log('Bot 命令菜单设置成功');
+    } else {
+      this.logger.warn('Bot 命令菜单设置失败');
+    }
+  }
+
+  /**
+   * 处理用户状态消息
+   */
+  private async handleUserStateMessage(msg: TelegramBot.Message): Promise<boolean> {
+    const chatId = msg.chat.id;
+    const userId = msg.from?.id?.toString() || chatId.toString();
+    const text = msg.text?.trim() || '';
+    
+    // 检查用户是否有待处理的状态
+    const userState = this.userStates.get(userId);
+    if (!userState) {
+      return false; // 没有状态，表示消息未被处理
+    }
+
+    // 检查状态是否过期
+    if (Date.now() - userState.timestamp > this.STATE_TIMEOUT) {
+      this.userStates.delete(userId);
+      await this.sendMessage(chatId, `
+⏰ <b>会话超时</b>
+
+您的操作已超时，请重新开始。
+
+💡 使用 <code>/add SYMBOL</code> 直接添加交易对
+      `.trim(), { parse_mode: 'HTML' });
+      return true;
+    }
+
+    try {
+      switch (userState.action) {
+        case 'waiting_for_add_symbol':
+          await this.handleAddSymbolInput(chatId, userId, text);
+          break;
+        
+        case 'waiting_for_remove_symbol':
+          await this.handleRemoveSymbolInput(chatId, userId, text);
+          break;
+
+        default:
+          this.userStates.delete(userId);
+          return false;
+      }
+      
+      return true; // 消息已被处理
+    } catch (error) {
+      this.logger.error('处理用户状态消息时出错:', error);
+      this.userStates.delete(userId);
+      await this.sendErrorMessage(chatId, '处理您的输入时发生错误，请重试');
+      return true;
+    }
+  }
+
+  /**
+   * 处理添加交易对的输入
+   */
+  private async handleAddSymbolInput(chatId: number, userId: string, symbol: string): Promise<void> {
+    if (!symbol) {
+      await this.sendMessage(chatId, `
+❌ <b>输入为空</b>
+
+请输入有效的交易对符号：
+
+💡 <b>示例：</b>
+• BTCUSDT
+• ETHUSDT
+• SOLUSDT
+      `.trim(), { parse_mode: 'HTML' });
+      return;
+    }
+
+    // 清除用户状态
+    this.userStates.delete(userId);
+    
+    // 处理添加命令
+    await this.handleAddCommand(chatId, symbol.toUpperCase());
+  }
+
+  /**
+   * 处理移除交易对的输入
+   */
+  private async handleRemoveSymbolInput(chatId: number, userId: string, symbol: string): Promise<void> {
+    if (!symbol) {
+      await this.sendMessage(chatId, `
+❌ <b>输入为空</b>
+
+请输入要移除的交易对符号：
+
+💡 <b>示例：</b>
+• BTCUSDT
+• ETHUSDT
+• SOLUSDT
+      `.trim(), { parse_mode: 'HTML' });
+      return;
+    }
+
+    // 清除用户状态
+    this.userStates.delete(userId);
+    
+    // 处理移除命令
+    await this.handleRemoveCommand(chatId, symbol.toUpperCase());
   }
 
   /**
@@ -228,7 +497,7 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
    */
   private async handleStartCommand(chatId: number): Promise<void> {
     const mainMenu = MenuTemplate.getMainMenu();
-    const menuOptions = MenuTemplate.getAnalysisTypeMenu();
+    const menuOptions = MenuTemplate.getMainMenuKeyboard();
     await this.sendMessage(chatId, mainMenu, menuOptions);
   }
 
@@ -322,7 +591,7 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
    */
   private async showMainMenu(chatId: number): Promise<void> {
     const mainMenu = MenuTemplate.getMainMenu();
-    const menuOptions = MenuTemplate.getAnalysisTypeMenu();
+    const menuOptions = MenuTemplate.getMainMenuKeyboard();
     await this.sendMessage(chatId, mainMenu, menuOptions);
   }
 
@@ -687,5 +956,115 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
   async performSupportResistanceAnalysis(symbol: string, chatId?: number): Promise<void> {
     const targetChatId = chatId || parseInt(this.config.chatId);
     await this.performAnalysis(symbol, AnalysisType.SUPPORT_RESISTANCE, targetChatId);
+  }
+
+  // ==================== 新增的交易对管理方法 ====================
+
+  /**
+   * 显示交易对管理菜单
+   */
+  private async showSymbolManagementMenu(chatId: number): Promise<void> {
+    try {
+      await this.sendMessage(chatId, `
+⚙️ <b>交易对管理</b>
+
+选择您要执行的操作：
+
+📋 <b>查看关注列表</b> - 查看当前关注的所有交易对
+➕ <b>添加交易对</b> - 添加新的交易对到关注列表
+➖ <b>移除交易对</b> - 从关注列表中移除交易对
+
+💡 您也可以直接使用命令：
+• <code>/add SYMBOL</code> - 快速添加
+• <code>/remove SYMBOL</code> - 快速移除
+• <code>/list</code> - 查看列表
+      `.trim(), MenuTemplate.getSymbolManagementMenu());
+    } catch (error) {
+      this.logger.error('显示交易对管理菜单时出错:', error);
+      await this.sendErrorMessage(chatId, '显示管理菜单时发生错误');
+    }
+  }
+
+  /**
+   * 处理添加交易对回调
+   */
+  private async handleAddSymbolCallback(chatId: number, userId: string): Promise<void> {
+    try {
+      // 设置用户状态等待输入
+      this.userStates.set(userId, {
+        action: 'waiting_for_add_symbol',
+        timestamp: Date.now()
+      });
+
+      await this.sendMessage(chatId, `
+➕ <b>添加交易对</b>
+
+请输入您要添加的交易对符号：
+
+💡 <b>示例：</b>
+• BTCUSDT
+• ETHUSDT  
+• SOLUSDT
+• DOGEUSDT
+
+📝 <i>直接发送交易对符号即可</i>
+
+⏰ <i>该操作将在5分钟后自动取消</i>
+      `.trim(), { parse_mode: 'HTML' });
+    } catch (error) {
+      this.logger.error('处理添加交易对回调时出错:', error);
+      await this.sendErrorMessage(chatId, '启动添加流程时发生错误');
+    }
+  }
+
+  /**
+   * 处理移除交易对回调
+   */
+  private async handleRemoveSymbolCallback(chatId: number, userId: string): Promise<void> {
+    try {
+      // 先检查是否有关注的交易对
+      const activeConfigs = await this.coinConfigService.findActiveConfigs();
+      if (activeConfigs.length === 0) {
+        await this.sendMessage(chatId, `
+📋 <b>关注列表为空</b>
+
+目前没有任何关注的交易对可以移除。
+
+💡 使用 <code>/add SYMBOL</code> 先添加一些交易对
+        `.trim(), { parse_mode: 'HTML' });
+        return;
+      }
+
+      // 设置用户状态等待输入
+      this.userStates.set(userId, {
+        action: 'waiting_for_remove_symbol',
+        timestamp: Date.now()
+      });
+
+      // 获取唯一的交易对符号
+      const uniqueSymbols = [...new Set(activeConfigs.map(config => config.symbol))];
+      const symbolsList = uniqueSymbols.slice(0, 10).join(', '); // 只显示前10个
+      const remainingCount = uniqueSymbols.length - 10;
+
+      await this.sendMessage(chatId, `
+➖ <b>移除交易对</b>
+
+请输入您要移除的交易对符号：
+
+📋 <b>当前关注的交易对：</b>
+${symbolsList}${remainingCount > 0 ? `\n<i>...还有 ${remainingCount} 个</i>` : ''}
+
+💡 <b>示例：</b>
+• BTCUSDT
+• ETHUSDT
+
+📝 <i>直接发送交易对符号即可</i>
+
+⏰ <i>该操作将在5分钟后自动取消</i>
+      `.trim(), { parse_mode: 'HTML' });
+    } catch (error) {
+      this.logger.error('处理移除交易对回调时出错:', error);
+      await this.sendErrorMessage(chatId, '启动移除流程时发生错误');
+    }
   }
 } 

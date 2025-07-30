@@ -55,3 +55,11 @@ export interface CallbackQueryHandler {
   description: string;
   handler: (query: TelegramBot.CallbackQuery) => Promise<void>;
 }
+
+/**
+ * 消息处理器接口
+ */
+export interface MessageHandler {
+  description: string;
+  handler: (msg: TelegramBot.Message) => Promise<boolean>; // 返回 true 表示已处理，false 表示未处理
+}
