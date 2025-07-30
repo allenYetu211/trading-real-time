@@ -14,7 +14,9 @@ export class ComprehensiveAnalysisFormatter {
     emaAnalysis: any,
     emaDetailedData: any,
     trendAnalysis: any,
-    srAnalysis: any
+    srAnalysis: any,
+    rsiAnalysis?: any,
+    openInterestData?: any
   ): string {
     const { overallTrend, overallConfidence, tradingSuggestion, timeframes, trendAlignment } = trendAnalysis;
     const { currentPrice, keyLevels, currentPosition, allLevels } = srAnalysis;
@@ -98,7 +100,7 @@ ${trendEmoji} 整体趋势: ${FormatUtil.getTrendDescription(overallTrend)}
 ${EmojiUtil.getActionEmoji(tradingSuggestion.action)} <b>${FormatUtil.getActionDescription(tradingSuggestion.action)}</b>
 📝 理由: ${tradingSuggestion.reason}
 ⚠️ 风险级别: ${tradingSuggestion.riskLevel}
-
+${this.formatRSISection(rsiAnalysis)}${this.formatOpenInterestSection(openInterestData)}
 📋 <b>数据统计:</b>
 • 数据点数: ${emaDetailedData.totalCount}
 • 数据源: ${emaDetailedData.exchange}
@@ -162,5 +164,58 @@ ${EmojiUtil.getActionEmoji(tradingSuggestion.action)} <b>${FormatUtil.getActionD
     });
 
     return { buyZones, sellZones };
+  }
+
+  /**
+   * 格式化RSI信息部分
+   */
+  private static formatRSISection(rsiAnalysis?: any): string {
+    if (!rsiAnalysis) return '';
+
+    const { currentRSI, signal, trend, recommendation, riskLevel } = rsiAnalysis;
+    
+    const signalEmoji = {
+      'strong_buy': '🟢',
+      'buy': '🟡',
+      'hold': '🔵',
+      'sell': '🟠',
+      'strong_sell': '🔴'
+    };
+
+    const riskEmoji = {
+      'low': '🟢',
+      'medium': '🟡',
+      'high': '🔴'
+    };
+
+    return `
+
+📉 <b>RSI 技术指标:</b>
+• RSI值: ${currentRSI.rsi.toFixed(2)} (${currentRSI.signal})
+• 强度: ${currentRSI.strength}
+• ${signalEmoji[signal]} 信号: ${signal.toUpperCase()}
+• 趋势: ${trend} | ${riskEmoji[riskLevel]} 风险: ${riskLevel.toUpperCase()}
+`;
+  }
+
+  /**
+   * 格式化持仓量信息部分
+   */
+  private static formatOpenInterestSection(openInterestData?: any): string {
+    if (!openInterestData) return '';
+
+    const formatNumber = (num: number) => {
+      if (num >= 1e9) return `${(num / 1e9).toFixed(2)}B`;
+      if (num >= 1e6) return `${(num / 1e6).toFixed(2)}M`;
+      if (num >= 1e3) return `${(num / 1e3).toFixed(2)}K`;
+      return num.toFixed(2);
+    };
+
+    return `
+
+💰 <b>期货持仓量:</b>
+• 当前持仓量: ${formatNumber(openInterestData.openInterest)}
+• 更新时间: ${new Date(openInterestData.timestamp).toLocaleTimeString('zh-CN')}
+`;
   }
 } 

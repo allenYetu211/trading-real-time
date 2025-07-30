@@ -3,6 +3,8 @@ import { CoreTechnicalAnalysisResult } from '../../../shared/interfaces/analysis
 
 // CCXT 分析服务
 import { EMAAnalysisService } from '../../ccxt-analysis/services/ema-analysis.service';
+import { RSIAnalysisService } from '../../ccxt-analysis/services/rsi-analysis.service';
+import { OpenInterestService } from '../../ccxt-analysis/services/open-interest.service';
 
 // 技术分析服务
 import { MultiTimeframeTrendService } from './multi-timeframe-trend.service';
@@ -18,6 +20,8 @@ export class CoreTechnicalAnalysisService {
 
   constructor(
     private readonly emaAnalysisService: EMAAnalysisService,
+    private readonly rsiAnalysisService: RSIAnalysisService,
+    private readonly openInterestService: OpenInterestService,
     private readonly multiTimeframeTrendService: MultiTimeframeTrendService,
     private readonly supportResistanceService: SupportResistanceService,
   ) {}
@@ -37,13 +41,32 @@ export class CoreTechnicalAnalysisService {
     this.logger.log(`开始执行 ${symbol} 核心技术分析`);
 
     try {
-      // 并行执行所有分析功能 (使用100根K线，约4-5个月数据)
+      // 并行执行核心分析功能
       const [emaAnalysis, emaDetailedData, trendAnalysis, srAnalysis] = await Promise.all([
         this.emaAnalysisService.analyzeEMA(symbol, '1d', [20, 60, 120]),
         this.emaAnalysisService.getDetailedEMAData(symbol, '1d', [20, 60, 120], 100),
         this.multiTimeframeTrendService.analyzeMultiTimeframeTrend(symbol, exchange),
         this.supportResistanceService.analyzeSupportResistance(symbol, exchange),
       ]);
+
+      // 尝试获取RSI和持仓量数据（可选，不影响核心分析）
+      let rsiAnalysis = null;
+      // let openInterestData = null;
+
+      try {
+        // RSI分析（适用于所有交易对）
+        rsiAnalysis = await this.rsiAnalysisService.getRSIAnalysis(symbol);
+      } catch (error) {
+        this.logger.warn(`RSI分析失败 ${symbol}:`, error.message);
+      }
+
+      // try {
+      //   // 持仓量分析（仅适用于期货合约）
+      //   const futuresSymbol = this.convertToFuturesSymbol(symbol);
+      //   openInterestData = await this.openInterestService.getOpenInterest(futuresSymbol, 'binanceusdm');
+      // } catch (error) {
+      //   this.logger.warn(`持仓量分析失败 ${symbol}:`, error.message);
+      // }
 
       const result: CoreTechnicalAnalysisResult = {
         symbol,
@@ -52,6 +75,8 @@ export class CoreTechnicalAnalysisService {
         emaDetailedData,
         trendAnalysis,
         srAnalysis,
+        rsiAnalysis,
+        // openInterestData,
       };
 
       this.logger.log(`${symbol} 核心技术分析完成`);
@@ -91,5 +116,14 @@ export class CoreTechnicalAnalysisService {
       analysis: coreResult.emaAnalysis,
       detailedData: coreResult.emaDetailedData,
     };
+  }
+
+  /**
+   * 将现货交易对转换为期货合约格式
+   */
+  private convertToFuturesSymbol(symbol: string): string {
+    // 移除USDT后缀并添加期货格式
+    const base = symbol.replace('USDT', '');
+    return `${base}/USDT:USDT`;
   }
 }

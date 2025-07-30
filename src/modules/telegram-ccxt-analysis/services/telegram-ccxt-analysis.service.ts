@@ -5,6 +5,8 @@ import * as TelegramBot from 'node-telegram-bot-api';
 // 核心服务依赖
 import { EMAAnalysisService } from '../../ccxt-analysis/services/ema-analysis.service';
 import { CCXTDataService } from '../../ccxt-analysis/services/ccxt-data.service';
+import { OpenInterestService } from '../../ccxt-analysis/services/open-interest.service';
+import { RSIAnalysisService } from '../../ccxt-analysis/services/rsi-analysis.service';
 import { MultiTimeframeTrendService } from '../../technical-analysis/services/multi-timeframe-trend.service';
 import { SupportResistanceService } from '../../technical-analysis/services/support-resistance.service';
 import { CoreTechnicalAnalysisService } from '../../technical-analysis/services/core-technical-analysis.service';
@@ -38,6 +40,8 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly emaAnalysisService: EMAAnalysisService,
     private readonly ccxtDataService: CCXTDataService,
+    private readonly openInterestService: OpenInterestService,
+    private readonly rsiAnalysisService: RSIAnalysisService,
     private readonly multiTimeframeTrendService: MultiTimeframeTrendService,
     private readonly supportResistanceService: SupportResistanceService,
     private readonly coreTechnicalAnalysisService: CoreTechnicalAnalysisService,
@@ -218,7 +222,13 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
    * 处理分析回调
    */
   private async handleAnalysisCallback(data: string, chatId: number): Promise<void> {
-    const [, symbol, analysisType] = data.split(':');
+    // 数据格式: analyze:SYMBOL:ANALYSIS_TYPE
+    // 但对于期货合约，SYMBOL可能包含冒号，如 SOL/USDT:USDT
+    // 因此需要特殊处理，从最后一个冒号分割
+    const parts = data.split(':');
+    const analysisType = parts[parts.length - 1]; // 最后一部分是分析类型
+    const symbol = parts.slice(1, -1).join(':'); // 中间部分重新拼接成交易对
+    
     await this.performAnalysis(symbol, analysisType as AnalysisType, chatId);
   }
 
@@ -233,7 +243,9 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
       const message = await AnalysisProcessorUtil.performAnalysisByType(
         this.coreTechnicalAnalysisService,
         symbol,
-        analysisType
+        analysisType,
+        this.rsiAnalysisService,
+        this.openInterestService
       );
       await this.sendMessage(chatId, message);
 

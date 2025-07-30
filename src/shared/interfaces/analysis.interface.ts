@@ -69,4 +69,6 @@ export interface CoreTechnicalAnalysisResult {
   emaDetailedData: any; // 详细EMA数据，包含100根K线数据
   trendAnalysis: any; // 多时间周期趋势分析结果
   srAnalysis: any; // 支撑阻力位分析结果
+  rsiAnalysis?: any; // RSI分析结果（可选）
+  openInterestData?: any; // 持仓量数据（可选，仅适用于期货）
 } 

@@ -42,7 +42,9 @@ export enum AnalysisType {
   COMPREHENSIVE = 'comprehensive',
   TREND = 'trend',
   SUPPORT_RESISTANCE = 'support_resistance',
-  EMA = 'ema'
+  EMA = 'ema',
+  RSI = 'rsi',
+  OPEN_INTEREST = 'open_interest'
 }
 
 /**
