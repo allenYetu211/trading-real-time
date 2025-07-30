@@ -14,6 +14,7 @@ import { CCXTAnalysisModule } from './modules/ccxt-analysis/ccxt-analysis.module
 import { TechnicalAnalysisModule } from './modules/technical-analysis/technical-analysis.module';
 import { TelegramCCXTAnalysisModule } from './modules/telegram-ccxt-analysis/telegram-ccxt-analysis.module';
 import { TradingAutomationModule } from './modules/trading-automation/trading-automation.module';
+import { TelegramBotModule } from './modules/telegram-bot/telegram-bot.module';
 import { appConfig, databaseConfig, redisConfig, binanceConfig, okxConfig, notionConfig, telegramConfig } from './config';
 
 @Module({
@@ -23,6 +24,7 @@ import { appConfig, databaseConfig, redisConfig, binanceConfig, okxConfig, notio
       load: [appConfig, databaseConfig, redisConfig, binanceConfig, okxConfig, notionConfig, telegramConfig],
     }),
     PrismaModule,
+    TelegramBotModule, // 全局 Telegram Bot 模块，必须在其他使用 TelegramBot 的模块之前导入
     CoinConfigModule,
     OkxIntegrationModule,
     NotionIntegrationModule,

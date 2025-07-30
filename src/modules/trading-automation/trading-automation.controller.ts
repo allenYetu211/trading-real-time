@@ -272,7 +272,8 @@ export class TradingAutomationController {
 
       if (body.type === 'SYSTEM_STATUS') {
         success = await this.tradingNotificationService.sendSystemStatusNotification({
-          type: 'START',
+          type: 'info',
+          title: '系统启动测试',
           message: `测试通知: ${body.message}`,
           timestamp: Date.now(),
         });

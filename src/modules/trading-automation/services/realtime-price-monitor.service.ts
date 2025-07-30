@@ -180,7 +180,7 @@ export class RealtimePriceMonitorService implements OnModuleInit, OnModuleDestro
     const previousPrice = this.latestPrices.get(symbol);
     this.latestPrices.set(symbol, price);
 
-    this.logger.debug(`${symbol} 价格更新: ${price}`);
+    // this.logger.debug(`${symbol} 价格更新: ${price}`);
 
     try {
       // 检查价格触发条件

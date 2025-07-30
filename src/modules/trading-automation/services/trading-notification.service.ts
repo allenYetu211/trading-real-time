@@ -1,40 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { BotManagerUtil } from 'src/modules/telegram-ccxt-analysis/utils/bot/bot-manager.util';
-import { TelegramConfig } from 'src/modules/telegram-ccxt-analysis/utils/interfaces/telegram.interface';
+import { TelegramBotService, BotStatus, SendMessageResult } from 'src/modules/telegram-bot';
 import { TriggerEvent } from '../interfaces';
-import * as TelegramBot from 'node-telegram-bot-api';
 
 /**
  * 交易通知服务
  * 负责发送价格触发相关的Telegram通知
+ * 使用统一的 TelegramBotService 来发送消息
  */
 @Injectable()
 export class TradingNotificationService {
   private readonly logger = new Logger(TradingNotificationService.name);
-  private bot: TelegramBot | null = null;
-  private config: TelegramConfig;
 
-  constructor(private readonly configService: ConfigService) {
-    this.config = this.configService.get<TelegramConfig>('telegram')!;
-    this.initializeBot();
-  }
-
-  /**
-   * 初始化Telegram Bot
-   */
-  private initializeBot(): void {
-    try {
-      this.bot = BotManagerUtil.createBot(this.config);
-      if (this.bot) {
-        this.logger.log('交易通知服务的Telegram Bot初始化成功');
-      } else {
-        this.logger.warn('Telegram Bot未初始化，通知功能将不可用');
-      }
-    } catch (error) {
-      this.logger.error(`初始化Telegram Bot失败: ${error.message}`);
-    }
-  }
+  constructor(private readonly telegramBotService: TelegramBotService) {}
 
   /**
    * 发送价格触发通知
@@ -43,24 +20,19 @@ export class TradingNotificationService {
     try {
       const message = this.formatPriceTriggerMessage(triggerEvent);
       
-      const success = await BotManagerUtil.sendMessage(
-        this.bot,
-        parseInt(this.config.chatId as string),
-        message,
-        {
-          parse_mode: 'HTML',
-          disable_web_page_preview: true,
-          disable_notification: false,
-        }
-      );
+      const result = await this.telegramBotService.sendToDefaultChat(message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        disable_notification: false,
+      });
 
-      if (success) {
+      if (result.success) {
         this.logger.log(`价格触发通知发送成功: ${triggerEvent.symbol} ${triggerEvent.triggerType}`);
       } else {
-        this.logger.error(`价格触发通知发送失败: ${triggerEvent.symbol} ${triggerEvent.triggerType}`);
+        this.logger.error(`价格触发通知发送失败: ${triggerEvent.symbol} ${triggerEvent.triggerType} - ${result.error}`);
       }
 
-      return success;
+      return result.success;
 
     } catch (error) {
       this.logger.error(`发送价格触发通知异常: ${error.message}`);
@@ -76,252 +48,124 @@ export class TradingNotificationService {
     
     // 根据触发类型选择图标和颜色
     const typeIcon = triggerType === 'BUY' ? '💚' : '🔴';
-    const typeText = triggerType === 'BUY' ? '买入区间' : '卖出区间';
-    const actionText = triggerType === 'BUY' ? '买入机会' : '卖出机会';
+    const actionText = triggerType === 'BUY' ? '买入信号' : '卖出信号';
     
-    // 计算价格范围
-    const lowerBound = targetPrice - tolerance;
-    const upperBound = targetPrice + tolerance;
+    // 计算价格偏差
+    const priceDeviation = ((currentPrice - targetPrice) / targetPrice * 100).toFixed(2);
     
-    // 格式化时间
-    const time = new Date(timestamp).toLocaleString('zh-CN', {
-      timeZone: 'Asia/Shanghai',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
+    const message = `
+🎯 <b>${actionText}</b> ${typeIcon}
 
-    // 构建消息
-    let message = `${typeIcon} <b>价格触发提醒</b>\n\n`;
-    message += `📊 <b>交易对:</b> ${symbol}\n`;
-    message += `⚡ <b>触发类型:</b> ${actionText}\n`;
-    message += `💰 <b>当前价格:</b> $${currentPrice.toFixed(4)}\n\n`;
-    
-    message += `🎯 <b>触及${typeText}:</b>\n`;
-    message += `   • 目标价格: $${targetPrice.toFixed(4)}\n`;
-    message += `   • 容差范围: ±$${tolerance.toFixed(4)}\n`;
-    message += `   • 价格区间: $${lowerBound.toFixed(4)} - $${upperBound.toFixed(4)}\n`;
-    message += `   • 置信度: ${(confidence * 100).toFixed(1)}%\n\n`;
-    
-    // 添加市场建议
-    if (triggerType === 'BUY') {
-      message += `📈 <b>建议操作:</b>\n`;
-      message += `   • 考虑逐步建仓\n`;
-      message += `   • 注意风险控制\n`;
-      message += `   • 设置止损位\n\n`;
-    } else {
-      message += `📉 <b>建议操作:</b>\n`;
-      message += `   • 考虑获利了结\n`;
-      message += `   • 分批卖出\n`;
-      message += `   • 关注突破情况\n\n`;
-    }
-    
-    message += `⏰ <b>触发时间:</b> ${time}\n`;
-    message += `🤖 <b>自动监控系统</b>`;
+📊 <b>交易对:</b> ${symbol}
+💰 <b>当前价格:</b> $${currentPrice.toFixed(6)}
+🎯 <b>目标价格:</b> $${targetPrice.toFixed(6)}
+📈 <b>偏差:</b> ${priceDeviation}%
+⚡ <b>容差:</b> ${(tolerance * 100).toFixed(2)}%
+🎯 <b>置信度:</b> ${(confidence * 100).toFixed(1)}%
+
+⏰ <b>时间:</b> ${new Date(timestamp).toLocaleString('zh-CN')}
+
+#价格触发 #${symbol.replace('/', '')} #${triggerType}
+    `.trim();
 
     return message;
   }
 
   /**
-   * 发送多区间触发合并通知
+   * 发送多区域触发通知
    */
   async sendMultiZoneTriggerNotification(triggerEvents: TriggerEvent[]): Promise<boolean> {
-    if (triggerEvents.length === 0) return false;
-
     try {
+      if (triggerEvents.length === 0) return false;
+
+      const symbol = triggerEvents[0].symbol;
       const message = this.formatMultiZoneTriggerMessage(triggerEvents);
       
-      const success = await BotManagerUtil.sendMessage(
-        this.bot,
-        parseInt(this.config.chatId as string),
-        message,
-        {
-          parse_mode: 'HTML',
-          disable_web_page_preview: true,
-          disable_notification: false,
-        }
-      );
+      const result = await this.telegramBotService.sendToDefaultChat(message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        disable_notification: false,
+      });
 
-      if (success) {
-        this.logger.log(`多区间触发通知发送成功: ${triggerEvents[0].symbol} ${triggerEvents[0].triggerType} (${triggerEvents.length}个区间)`);
+      if (result.success) {
+        this.logger.log(`多区域触发通知发送成功: ${symbol} (${triggerEvents.length}个区域)`);
       } else {
-        this.logger.error(`多区间触发通知发送失败: ${triggerEvents[0].symbol} ${triggerEvents[0].triggerType}`);
+        this.logger.error(`多区域触发通知发送失败: ${symbol} - ${result.error}`);
       }
 
-      return success;
+      return result.success;
 
     } catch (error) {
-      this.logger.error(`发送多区间触发通知异常: ${error.message}`);
+      this.logger.error(`发送多区域触发通知异常: ${error.message}`);
       return false;
     }
   }
 
   /**
-   * 格式化多区间触发消息
+   * 格式化多区域触发消息
    */
   private formatMultiZoneTriggerMessage(triggerEvents: TriggerEvent[]): string {
-    const firstEvent = triggerEvents[0];
-    const { symbol, triggerType, currentPrice, timestamp } = firstEvent;
+    const symbol = triggerEvents[0].symbol;
+    const currentPrice = triggerEvents[0].currentPrice;
     
-    // 根据触发类型选择图标和颜色
-    const typeIcon = triggerType === 'BUY' ? '💚' : '🔴';
-    const typeText = triggerType === 'BUY' ? '买入区间' : '卖出区间';
-    const actionText = triggerType === 'BUY' ? '买入机会' : '卖出机会';
+    const buyEvents = triggerEvents.filter(e => e.triggerType === 'BUY');
+    const sellEvents = triggerEvents.filter(e => e.triggerType === 'SELL');
     
-    // 格式化时间
-    const time = new Date(timestamp).toLocaleString('zh-CN', {
-      timeZone: 'Asia/Shanghai',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
+    let message = `
+🚨 <b>多区域价格触发</b> 🚨
 
-    // 构建消息
-    let message = `${typeIcon} <b>多区间价格触发</b>\n\n`;
-    message += `📊 <b>交易对:</b> ${symbol}\n`;
-    message += `⚡ <b>触发类型:</b> ${actionText}\n`;
-    message += `💰 <b>当前价格:</b> $${currentPrice.toFixed(4)}\n\n`;
-    
-    message += `🎯 <b>同时触及${triggerEvents.length}个${typeText}:</b>\n`;
-    
-    triggerEvents.forEach((event, index) => {
-      const lowerBound = event.targetPrice - event.tolerance;
-      const upperBound = event.targetPrice + event.tolerance;
-      message += `   ${index + 1}. $${event.targetPrice.toFixed(4)} (±$${event.tolerance.toFixed(4)}) [${(event.confidence * 100).toFixed(0)}%]\n`;
-      message += `      区间: $${lowerBound.toFixed(4)} - $${upperBound.toFixed(4)}\n`;
-    });
-    
-    message += `\n`;
-    
-    // 添加市场建议
-    if (triggerType === 'BUY') {
-      message += `📈 <b>建议操作:</b>\n`;
-      message += `   • 多区间触发显示强烈${actionText}信号\n`;
-      message += `   • 建议分批建仓\n`;
-      message += `   • 严格风险控制\n\n`;
-    } else {
-      message += `📉 <b>建议操作:</b>\n`;
-      message += `   • 多区间触发显示强烈${actionText}信号\n`;
-      message += `   • 建议分批出货\n`;
-      message += `   • 关注突破情况\n\n`;
+📊 <b>交易对:</b> ${symbol}
+💰 <b>当前价格:</b> $${currentPrice.toFixed(6)}
+⏰ <b>时间:</b> ${new Date().toLocaleString('zh-CN')}
+
+`;
+
+    if (buyEvents.length > 0) {
+      message += `\n💚 <b>买入信号 (${buyEvents.length}个):</b>\n`;
+      buyEvents.forEach((event, index) => {
+        const deviation = ((event.currentPrice - event.targetPrice) / event.targetPrice * 100).toFixed(2);
+        message += `${index + 1}. 目标: $${event.targetPrice.toFixed(6)} | 偏差: ${deviation}% | 置信度: ${(event.confidence * 100).toFixed(1)}%\n`;
+      });
     }
-    
-    message += `⏰ <b>触发时间:</b> ${time}\n`;
-    message += `🤖 <b>自动监控系统</b>`;
 
-    return message;
-  }
-
-  /**
-   * 发送分析完成通知
-   */
-  async sendAnalysisCompletionNotification(
-    symbol: string,
-    analysisResult: {
-      buyZonesCount: number;
-      sellZonesCount: number;
-      signal: string;
-      confidence: number;
-      timestamp: number;
+    if (sellEvents.length > 0) {
+      message += `\n🔴 <b>卖出信号 (${sellEvents.length}个):</b>\n`;
+      sellEvents.forEach((event, index) => {
+        const deviation = ((event.currentPrice - event.targetPrice) / event.targetPrice * 100).toFixed(2);
+        message += `${index + 1}. 目标: $${event.targetPrice.toFixed(6)} | 偏差: ${deviation}% | 置信度: ${(event.confidence * 100).toFixed(1)}%\n`;
+      });
     }
-  ): Promise<boolean> {
-    try {
-      const message = this.formatAnalysisCompletionMessage(symbol, analysisResult);
-      
-      const success = await BotManagerUtil.sendMessage(
-        this.bot,
-        parseInt(this.config.chatId as string),
-        message,
-        {
-          parse_mode: 'HTML',
-          disable_web_page_preview: true,
-          disable_notification: true, // 分析完成通知静默发送
-        }
-      );
 
-      if (success) {
-        this.logger.debug(`分析完成通知发送成功: ${symbol}`);
-      }
+    message += `\n#多区域触发 #${symbol.replace('/', '')} #批量信号`;
 
-      return success;
-
-    } catch (error) {
-      this.logger.error(`发送分析完成通知异常: ${error.message}`);
-      return false;
-    }
-  }
-
-  /**
-   * 格式化分析完成消息
-   */
-  private formatAnalysisCompletionMessage(
-    symbol: string,
-    analysisResult: {
-      buyZonesCount: number;
-      sellZonesCount: number;
-      signal: string;
-      confidence: number;
-      timestamp: number;
-    }
-  ): string {
-    const { buyZonesCount, sellZonesCount, signal, confidence, timestamp } = analysisResult;
-    
-    const time = new Date(timestamp).toLocaleString('zh-CN', {
-      timeZone: 'Asia/Shanghai',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
-    // 根据信号类型选择图标
-    const signalIcon = signal === 'BUY' ? '📈' : signal === 'SELL' ? '📉' : '⚖️';
-    
-    let message = `🔄 <b>技术分析更新</b>\n\n`;
-    message += `📊 <b>交易对:</b> ${symbol}\n`;
-    message += `${signalIcon} <b>信号:</b> ${signal} (${(confidence * 100).toFixed(1)}%)\n`;
-    message += `💚 <b>买入区间:</b> ${buyZonesCount} 个\n`;
-    message += `🔴 <b>卖出区间:</b> ${sellZonesCount} 个\n`;
-    message += `⏰ <b>更新时间:</b> ${time}\n\n`;
-    message += `🎯 价格监控已激活，触及区间时将立即通知`;
-
-    return message;
+    return message.trim();
   }
 
   /**
    * 发送系统状态通知
    */
-  async sendSystemStatusNotification(
-    status: {
-      type: 'START' | 'STOP' | 'ERROR' | 'RECONNECT';
-      message: string;
-      timestamp: number;
-      details?: any;
-    }
-  ): Promise<boolean> {
+  async sendSystemStatusNotification(status: {
+    type: 'info' | 'warning' | 'error';
+    title: string;
+    message: string;
+    timestamp?: number;
+  }): Promise<boolean> {
     try {
       const formattedMessage = this.formatSystemStatusMessage(status);
       
-      const success = await BotManagerUtil.sendMessage(
-        this.bot,
-        parseInt(this.config.chatId as string),
-        formattedMessage,
-        {
-          parse_mode: 'HTML',
-          disable_web_page_preview: true,
-          disable_notification: status.type === 'ERROR',
-        }
-      );
+      const result = await this.telegramBotService.sendToDefaultChat(formattedMessage, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        disable_notification: status.type === 'error' ? false : true,
+      });
 
-      if (success) {
-        this.logger.debug(`系统状态通知发送成功: ${status.type}`);
+      if (result.success) {
+        this.logger.log(`系统状态通知发送成功: ${status.type} - ${status.title}`);
+      } else {
+        this.logger.error(`系统状态通知发送失败: ${status.type} - ${status.title} - ${result.error}`);
       }
 
-      return success;
+      return result.success;
 
     } catch (error) {
       this.logger.error(`发送系统状态通知异常: ${error.message}`);
@@ -333,80 +177,85 @@ export class TradingNotificationService {
    * 格式化系统状态消息
    */
   private formatSystemStatusMessage(status: {
-    type: 'START' | 'STOP' | 'ERROR' | 'RECONNECT';
+    type: 'info' | 'warning' | 'error';
+    title: string;
     message: string;
-    timestamp: number;
-    details?: any;
+    timestamp?: number;
   }): string {
-    const { type, message, timestamp, details } = status;
-    
-    const time = new Date(timestamp).toLocaleString('zh-CN', {
-      timeZone: 'Asia/Shanghai',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const icons = {
+      info: 'ℹ️',
+      warning: '⚠️',
+      error: '❌'
+    };
 
-    let icon = '🤖';
-    let title = '系统状态';
-    
-    switch (type) {
-      case 'START':
-        icon = '✅';
-        title = '系统启动';
-        break;
-      case 'STOP':
-        icon = '⏹️';
-        title = '系统停止';
-        break;
-      case 'ERROR':
-        icon = '❌';
-        title = '系统错误';
-        break;
-      case 'RECONNECT':
-        icon = '🔄';
-        title = '系统重连';
-        break;
-    }
+    const typeNames = {
+      info: '信息',
+      warning: '警告',
+      error: '错误'
+    };
 
-    let formattedMessage = `${icon} <b>${title}</b>\n\n`;
-    formattedMessage += `📝 <b>消息:</b> ${message}\n`;
-    formattedMessage += `⏰ <b>时间:</b> ${time}\n`;
-    
-    if (details) {
-      formattedMessage += `\n🔍 <b>详细信息:</b>\n`;
-      if (typeof details === 'object') {
-        Object.entries(details).forEach(([key, value]) => {
-          formattedMessage += `   • ${key}: ${value}\n`;
-        });
-      } else {
-        formattedMessage += `   ${details}\n`;
-      }
-    }
+    const timestamp = status.timestamp || Date.now();
 
-    return formattedMessage;
+    const message = `
+${icons[status.type]} <b>系统${typeNames[status.type]}</b>
+
+📋 <b>标题:</b> ${status.title}
+📝 <b>详情:</b> ${status.message}
+⏰ <b>时间:</b> ${new Date(timestamp).toLocaleString('zh-CN')}
+
+#系统通知 #${status.type}
+    `.trim();
+
+    return message;
   }
 
   /**
-   * 检查通知服务是否可用
+   * 发送测试通知
    */
-  isNotificationEnabled(): boolean {
-    return this.bot !== null && this.config.enabled;
+  async sendTestNotification(): Promise<boolean> {
+    const testMessage = `
+🧪 <b>Telegram Bot 测试</b>
+
+✅ 消息发送功能正常
+⏰ 测试时间: ${new Date().toLocaleString('zh-CN')}
+
+#测试通知
+    `.trim();
+
+    const result = await this.telegramBotService.sendToDefaultChat(testMessage, {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      disable_notification: false,
+    });
+
+    if (result.success) {
+      this.logger.log('测试通知发送成功');
+    } else {
+      this.logger.error(`测试通知发送失败: ${result.error}`);
+    }
+
+    return result.success;
   }
 
   /**
    * 获取通知服务状态
    */
   getNotificationStatus(): {
-    enabled: boolean;
-    botInitialized: boolean;
-    chatId: number;
+    telegramBotStatus: BotStatus;
+    isReady: boolean;
   } {
+    const telegramBotStatus = this.telegramBotService.getBotStatus();
+    
     return {
-      enabled: this.config.enabled,
-      botInitialized: this.bot !== null,
-      chatId: parseInt(this.config.chatId as string),
+      telegramBotStatus,
+      isReady: telegramBotStatus.isEnabled && telegramBotStatus.isConnected,
     };
+  }
+
+  /**
+   * 检查服务是否准备就绪
+   */
+  isReady(): boolean {
+    return this.telegramBotService.isEnabled();
   }
 }
