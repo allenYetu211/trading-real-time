@@ -62,6 +62,9 @@ model AnalysisResult {
   confidence        Decimal  @db.Decimal(5, 2)
   patterns          String?  @db.Text
   supportResistance String?  @db.Text @map("support_resistance")
+  buyZones          String?  @db.Text @map("buy_zones")      // JSON格式存储买入区间
+  sellZones         String?  @db.Text @map("sell_zones")     // JSON格式存储卖出区间
+  currentPrice      Decimal? @db.Decimal(30, 8) @map("current_price")  // 分析时的当前价格
   summary           String?  @db.Text
   createdAt         DateTime @default(now()) @map("created_at")
 

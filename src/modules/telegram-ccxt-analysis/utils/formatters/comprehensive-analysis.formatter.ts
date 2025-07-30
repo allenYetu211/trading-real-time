@@ -34,7 +34,7 @@ export class ComprehensiveAnalysisFormatter {
 • 当前价格: $${FormatUtil.formatPrice(currentPrice)}
 • 100天最高: $${FormatUtil.formatPrice(priceRange.max)}
 • 100天最低: $${FormatUtil.formatPrice(priceRange.min)}
-• 价格区间: ${((currentPrice - priceRange.min) / (priceRange.max - priceRange.min) * 100).toFixed(1)}%位置
+• 价格区间: ${FormatUtil.calculatePricePosition(currentPrice, priceRange.min, priceRange.max)}
 
 📊 <b>EMA 技术指标:</b>
 • EMA20: $${FormatUtil.formatPrice(emaAnalysis.ema20)}

@@ -195,6 +195,9 @@ export class EMAAnalysisService {
         latestEMA[`ema${period}`] = emaValues[emaValues.length - 1];
       }
 
+      // 计算最近100天的价格范围（而不是全部历史数据）
+      const recent100HighLow = ohlcvData.slice(-100).flatMap(candle => [candle.high, candle.low]);
+
       return {
         symbol,
         timeframe,
@@ -204,6 +207,11 @@ export class EMAAnalysisService {
         latestPrice: closePrices[closePrices.length - 1],
         recent10Prices: closePrices.slice(-10),
         priceRange: {
+          min: Math.min(...recent100HighLow), // 基于最近100天的最高最低价
+          max: Math.max(...recent100HighLow),
+        },
+        // 添加完整历史价格范围（用于其他分析）
+        fullHistoryPriceRange: {
           min: Math.min(...closePrices),
           max: Math.max(...closePrices),
         },
@@ -260,6 +268,10 @@ export class EMAAnalysisService {
         latestEMA[`ema${period}`] = emaValues[emaValues.length - 1];
       }
 
+      // 计算最近100天的价格范围（而不是全部历史数据）
+      const recent100Prices = closePrices.slice(-100);
+      const recent100HighLow = ohlcvData.slice(-100).flatMap(candle => [candle.high, candle.low]);
+
       return {
         symbol,
         timeframe,
@@ -269,6 +281,11 @@ export class EMAAnalysisService {
         latestPrice: closePrices[closePrices.length - 1],
         recent10Prices: closePrices.slice(-10),
         priceRange: {
+          min: Math.min(...recent100HighLow), // 基于最近100天的最高最低价
+          max: Math.max(...recent100HighLow),
+        },
+        // 添加完整历史价格范围（用于其他分析）
+        fullHistoryPriceRange: {
           min: Math.min(...closePrices),
           max: Math.max(...closePrices),
         },

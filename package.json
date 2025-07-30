@@ -28,7 +28,10 @@
     "test:telegram-menu": "npx ts-node scripts/test-telegram-menu.ts",
     "test:telegram-interactive": "npx ts-node scripts/test-interactive-telegram.ts",
     "test:analysis": "npx ts-node scripts/test-realtime-analysis.ts",
-    "test:api": "npx ts-node scripts/test-api.ts"
+    "test:api": "npx ts-node scripts/test-api.ts",
+    "test:trading-automation": "npx ts-node scripts/test-trading-automation.ts",
+    "test:trading-monitor": "npx ts-node scripts/test-trading-automation.ts --monitor 120",
+    "test:trading-continuous": "npx ts-node scripts/test-trading-automation.ts --continuous"
   },
   "dependencies": {
     "@nestjs/cache-manager": "^3.0.1",

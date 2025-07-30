@@ -110,16 +110,76 @@ export class FormatUtil {
    * 计算最近价格范围
    */
   static calculateRecentPriceRange(emaDetailedData: any, days: number = 100): { min: number; max: number } {
-    if (!emaDetailedData || !emaDetailedData.klines || emaDetailedData.klines.length === 0) {
+    // 检查EMA详细数据是否存在且有价格范围信息
+    if (!emaDetailedData) {
       return { min: 0, max: 0 };
     }
 
-    const recentKlines = emaDetailedData.klines.slice(-days);
-    const prices = recentKlines.flatMap((kline: any) => [kline.high, kline.low]);
+    // 如果直接有priceRange，使用它
+    if (emaDetailedData.priceRange && emaDetailedData.priceRange.min && emaDetailedData.priceRange.max) {
+      return {
+        min: emaDetailedData.priceRange.min,
+        max: emaDetailedData.priceRange.max
+      };
+    }
+
+    // 如果有recent10Prices，基于它计算范围
+    if (emaDetailedData.recent10Prices && emaDetailedData.recent10Prices.length > 0) {
+      const prices = emaDetailedData.recent10Prices;
+      return {
+        min: Math.min(...prices),
+        max: Math.max(...prices)
+      };
+    }
+
+    // 如果有klines数据（向后兼容）
+    if (emaDetailedData.klines && emaDetailedData.klines.length > 0) {
+      const recentKlines = emaDetailedData.klines.slice(-days);
+      const prices = recentKlines.flatMap((kline: any) => [kline.high, kline.low]);
+      
+      return {
+        min: Math.min(...prices),
+        max: Math.max(...prices)
+      };
+    }
     
-    return {
-      min: Math.min(...prices),
-      max: Math.max(...prices)
-    };
+    // 如果有当前价格，使用它作为基准
+    if (emaDetailedData.latestPrice || emaDetailedData.currentPrice) {
+      const currentPrice = emaDetailedData.latestPrice || emaDetailedData.currentPrice;
+      return {
+        min: currentPrice * 0.95, // 假设5%的价格范围
+        max: currentPrice * 1.05
+      };
+    }
+
+    return { min: 0, max: 0 };
+  }
+
+  /**
+   * 安全计算价格位置百分比
+   */
+  static calculatePricePosition(currentPrice: number, minPrice: number, maxPrice: number): string {
+    // 处理无效数据的情况
+    if (!currentPrice || !minPrice || !maxPrice || minPrice === 0 || maxPrice === 0) {
+      return '数据不足';
+    }
+
+    // 处理价格范围为零的情况
+    const priceRange = maxPrice - minPrice;
+    if (priceRange === 0 || priceRange < 0) {
+      return '价格区间异常';
+    }
+
+    // 计算位置百分比
+    const position = ((currentPrice - minPrice) / priceRange * 100);
+    
+    // 确保百分比在合理范围内
+    if (position < 0) {
+      return '低于最低价';
+    } else if (position > 100) {
+      return '高于最高价';
+    } else {
+      return `${position.toFixed(1)}%位置`;
+    }
   }
 } 

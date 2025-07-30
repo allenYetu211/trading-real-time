@@ -13,6 +13,7 @@ import { NotionIntegrationModule } from './modules/notion-integration/notion-int
 import { CCXTAnalysisModule } from './modules/ccxt-analysis/ccxt-analysis.module';
 import { TechnicalAnalysisModule } from './modules/technical-analysis/technical-analysis.module';
 import { TelegramCCXTAnalysisModule } from './modules/telegram-ccxt-analysis/telegram-ccxt-analysis.module';
+import { TradingAutomationModule } from './modules/trading-automation/trading-automation.module';
 import { appConfig, databaseConfig, redisConfig, binanceConfig, okxConfig, notionConfig, telegramConfig } from './config';
 
 @Module({
@@ -29,6 +30,7 @@ import { appConfig, databaseConfig, redisConfig, binanceConfig, okxConfig, notio
     CCXTAnalysisModule,
     TechnicalAnalysisModule,
     TelegramCCXTAnalysisModule,
+    TradingAutomationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
