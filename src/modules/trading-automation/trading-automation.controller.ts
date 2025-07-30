@@ -244,6 +244,61 @@ export class TradingAutomationController {
   }
 
   /**
+   * 测试价格穿越检测
+   */
+  @Post('trigger/test-crossing')
+  @ApiOperation({ 
+    summary: '测试价格穿越检测', 
+    description: '测试价格从一个点变化到另一个点时的区间穿越检测' 
+  })
+  @ApiBody({
+    description: '价格穿越测试参数',
+    schema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: '交易对符号' },
+        fromPrice: { type: 'number', description: '起始价格' },
+        toPrice: { type: 'number', description: '目标价格' },
+        sendNotification: { type: 'boolean', description: '是否发送通知', default: false }
+      },
+      required: ['symbol', 'fromPrice', 'toPrice']
+    }
+  })
+  async testPriceCrossing(@Body() body: {
+    symbol: string;
+    fromPrice: number;
+    toPrice: number;
+    sendNotification?: boolean;
+  }) {
+    try {
+      // 模拟价格变化过程中的穿越检测
+      await this.priceTriggerDetectionService.checkPossibleMissedTriggers(
+        body.symbol,
+        body.fromPrice,
+        body.toPrice
+      );
+
+      return {
+        success: true,
+        message: '价格穿越测试完成',
+        data: {
+          symbol: body.symbol,
+          fromPrice: body.fromPrice,
+          toPrice: body.toPrice,
+          priceChange: body.toPrice - body.fromPrice,
+          timestamp: Date.now(),
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `价格穿越测试失败: ${error.message}`,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
    * 发送测试通知
    */
   @Post('notification/test')

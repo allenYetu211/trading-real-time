@@ -149,8 +149,8 @@ export class RealtimePriceMonitorService implements OnModuleInit, OnModuleDestro
             await this.handlePriceUpdate(symbol, price);
           }
           
-          // 每5秒获取一次价格
-          await this.sleep(5000);
+          // 每2秒获取一次价格，提高监控精度
+          await this.sleep(2000);
           
         } catch (error) {
           this.logger.error(`监控 ${symbol} 价格时出错: ${error.message}`);
@@ -180,11 +180,25 @@ export class RealtimePriceMonitorService implements OnModuleInit, OnModuleDestro
     const previousPrice = this.latestPrices.get(symbol);
     this.latestPrices.set(symbol, price);
 
-    // this.logger.debug(`${symbol} 价格更新: ${price}`);
+    // 检测大幅价格变动，可能错过区间穿越
+    if (previousPrice && Math.abs(price - previousPrice) > 0.5) {
+      this.logger.warn(
+        `检测到 ${symbol} 大幅价格变动: ${previousPrice} -> ${price} (变动: ${(price - previousPrice).toFixed(4)})`
+      );
+    }
 
     try {
       // 检查价格触发条件
       await this.priceTriggerDetectionService.checkPriceTriggers(symbol, price);
+      
+      // 如果有前一个价格，检查是否可能错过中间的区间穿越
+      if (previousPrice && Math.abs(price - previousPrice) > 1.0) {
+        await this.priceTriggerDetectionService.checkPossibleMissedTriggers(
+          symbol, 
+          previousPrice, 
+          price
+        );
+      }
       
       // 通知监听器
       const listeners = this.priceUpdateListeners.get(symbol) || [];

@@ -34,7 +34,7 @@ export class PriceTriggerDetectionService {
       const latestAnalysis = await this.getLatestAnalysisResult(symbol);
       
       if (!latestAnalysis || !latestAnalysis.buyZones || !latestAnalysis.sellZones) {
-        // this.logger.debug(`${symbol} 没有可用的交易区间数据`);
+        this.logger.debug(`${symbol} 没有可用的交易区间数据`);
         return;
       }
 
@@ -42,9 +42,14 @@ export class PriceTriggerDetectionService {
       const buyZones = JSON.parse(latestAnalysis.buyZones) as TradingZone[];
       const sellZones = JSON.parse(latestAnalysis.sellZones) as TradingZone[];
 
+      // this.logger.debug(
+      //   `检查 ${symbol} 价格 ${currentPrice} 触发条件 - 买入区间: ${buyZones.length}个, 卖出区间: ${sellZones.length}个`
+      // );
+
       // 检查买入区间触发
       for (const buyZone of buyZones) {
         if (this.isPriceInZone(currentPrice, buyZone)) {
+          this.logger.log(`${symbol} 价格 ${currentPrice} 触发买入区间 ${buyZone.price} (±${buyZone.tolerance})`);
           await this.handleZoneTrigger(symbol, 'BUY', currentPrice, buyZone);
         }
       }
@@ -52,6 +57,7 @@ export class PriceTriggerDetectionService {
       // 检查卖出区间触发
       for (const sellZone of sellZones) {
         if (this.isPriceInZone(currentPrice, sellZone)) {
+          this.logger.log(`${symbol} 价格 ${currentPrice} 触发卖出区间 ${sellZone.price} (±${sellZone.tolerance})`);
           await this.handleZoneTrigger(symbol, 'SELL', currentPrice, sellZone);
         }
       }
@@ -368,5 +374,90 @@ export class PriceTriggerDetectionService {
     }
 
     return result;
+  }
+
+  /**
+   * 检查可能错过的区间穿越触发
+   * 当价格出现大幅跳跃时，检查是否错过了中间的区间触发
+   */
+  async checkPossibleMissedTriggers(
+    symbol: string,
+    previousPrice: number,
+    currentPrice: number
+  ): Promise<void> {
+    try {
+      // 获取最新的分析结果
+      const latestAnalysis = await this.getLatestAnalysisResult(symbol);
+      
+      if (!latestAnalysis || !latestAnalysis.buyZones || !latestAnalysis.sellZones) {
+        return;
+      }
+
+      const buyZones = JSON.parse(latestAnalysis.buyZones) as TradingZone[];
+      const sellZones = JSON.parse(latestAnalysis.sellZones) as TradingZone[];
+
+      // 确定价格变动方向
+      const isMovingUp = currentPrice > previousPrice;
+      const isMovingDown = currentPrice < previousPrice;
+
+      // 检查买入区间是否被穿越
+      for (const buyZone of buyZones) {
+        if (this.wasZoneCrossed(previousPrice, currentPrice, buyZone)) {
+          this.logger.warn(
+            `检测到可能错过的买入区间穿越: ${symbol} 价格从 ${previousPrice} -> ${currentPrice}，穿越区间 ${buyZone.price} (±${buyZone.tolerance})`
+          );
+          
+          // 使用区间中心价格触发通知
+          await this.handleZoneTrigger(symbol, 'BUY', buyZone.price, buyZone);
+        }
+      }
+
+      // 检查卖出区间是否被穿越
+      for (const sellZone of sellZones) {
+        if (this.wasZoneCrossed(previousPrice, currentPrice, sellZone)) {
+          this.logger.warn(
+            `检测到可能错过的卖出区间穿越: ${symbol} 价格从 ${previousPrice} -> ${currentPrice}，穿越区间 ${sellZone.price} (±${sellZone.tolerance})`
+          );
+          
+          // 使用区间中心价格触发通知
+          await this.handleZoneTrigger(symbol, 'SELL', sellZone.price, sellZone);
+        }
+      }
+
+    } catch (error) {
+      this.logger.error(`检查可能错过的触发失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 判断价格变动是否穿越了指定区间
+   */
+  private wasZoneCrossed(
+    previousPrice: number,
+    currentPrice: number,
+    zone: TradingZone
+  ): boolean {
+    const lowerBound = zone.price - zone.tolerance;
+    const upperBound = zone.price + zone.tolerance;
+
+    // 检查是否从区间外进入区间内，或从区间内离开区间外
+    const wasOutsideZone = previousPrice < lowerBound || previousPrice > upperBound;
+    const isInsideZone = currentPrice >= lowerBound && currentPrice <= upperBound;
+    const wasInsideZone = previousPrice >= lowerBound && previousPrice <= upperBound;
+    const isOutsideZone = currentPrice < lowerBound || currentPrice > upperBound;
+
+    // 价格从区间外进入区间内
+    const enteredZone = wasOutsideZone && isInsideZone;
+    
+    // 价格从区间内离开到区间外
+    const exitedZone = wasInsideZone && isOutsideZone;
+
+    // 价格跨越了整个区间（快速穿越）
+    const crossedThrough = (
+      (previousPrice < lowerBound && currentPrice > upperBound) ||
+      (previousPrice > upperBound && currentPrice < lowerBound)
+    );
+
+    return enteredZone || crossedThrough;
   }
 }
