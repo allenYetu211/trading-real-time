@@ -36,6 +36,10 @@ export interface BotStatus {
   isEnabled: boolean;
   lastError?: string;
   uptime?: number;
+  connectionStatus?: string;
+  reconnectAttempts?: number;
+  maxReconnectAttempts?: number;
+  isReconnecting?: boolean;
 }
 
 /**

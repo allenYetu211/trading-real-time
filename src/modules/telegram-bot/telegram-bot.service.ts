@@ -27,6 +27,9 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   private messageHandlers: MessageHandler[] = [];
   private startTime: number = Date.now();
   private lastError: string | null = null;
+  private reconnectAttempts: number = 0;
+  private readonly maxReconnectAttempts: number = 5;
+  private reconnectTimeout: NodeJS.Timeout | null = null;
 
   constructor(private readonly configService: ConfigService) {
     this.config = this.configService.get<TelegramConfig>('telegram')!;
@@ -70,6 +73,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         this.logger.error(`Telegram Bot 错误: ${error.message}`);
         this.lastError = error.message;
         this.connectionStatus = BotConnectionStatus.ERROR;
+        this.handleBotError(error);
       });
 
       // 设置轮询错误处理
@@ -77,6 +81,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         this.logger.error(`Telegram Bot 轮询错误: ${error.message}`);
         this.lastError = error.message;
         this.connectionStatus = BotConnectionStatus.ERROR;
+        this.handleBotError(error);
       });
 
       // 设置消息处理
@@ -92,6 +97,8 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       this.connectionStatus = BotConnectionStatus.CONNECTED;
       this.lastError = null;
       this.startTime = Date.now();
+      this.reconnectAttempts = 0; // 重置重连计数器
+      this.clearReconnectTimeout(); // 清理重连超时
       this.logger.log('Telegram Bot 初始化成功');
 
     } catch (error) {
@@ -105,6 +112,8 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
    * 销毁 Bot 实例
    */
   private async destroyBot(): Promise<void> {
+    this.clearReconnectTimeout(); // 清理重连超时
+    
     if (this.bot) {
       try {
         await this.bot.stopPolling();
@@ -341,7 +350,11 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       lastError: this.lastError || undefined,
       uptime: this.connectionStatus === BotConnectionStatus.CONNECTED 
         ? Date.now() - this.startTime 
-        : undefined
+        : undefined,
+      connectionStatus: this.connectionStatus,
+      reconnectAttempts: this.reconnectAttempts,
+      maxReconnectAttempts: this.maxReconnectAttempts,
+      isReconnecting: this.connectionStatus === BotConnectionStatus.RECONNECTING
     };
   }
 
@@ -375,7 +388,66 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
    */
   async reconnect(): Promise<void> {
     this.logger.log('尝试重新连接 Telegram Bot...');
+    this.reconnectAttempts = 0; // 手动重连时重置计数器
     await this.destroyBot();
     await this.initializeBot();
+  }
+
+  /**
+   * 处理 Bot 错误
+   */
+  private handleBotError(error: any): void {
+    // 检查是否是 409 错误（Conflict - 通常是多个轮询实例冲突）
+    const errorMessage = error.message || error.toString();
+    const is409Error = errorMessage.includes('409') || 
+                       errorMessage.includes('Conflict') ||
+                       errorMessage.includes('terminated by other getUpdates request');
+
+    if (is409Error) {
+      this.logger.warn(`检测到 409 冲突错误，准备重连: ${errorMessage}`);
+      this.scheduleReconnect();
+    }
+  }
+
+  /**
+   * 调度重连
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.logger.error(`已达到最大重连次数 (${this.maxReconnectAttempts})，停止重连尝试`);
+      return;
+    }
+
+    // 清理之前的重连超时
+    this.clearReconnectTimeout();
+
+    this.reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 30000); // 指数退避，最大30秒
+
+    this.logger.log(`第 ${this.reconnectAttempts} 次重连尝试，将在 ${delay}ms 后执行`);
+    this.connectionStatus = BotConnectionStatus.RECONNECTING;
+
+    this.reconnectTimeout = setTimeout(async () => {
+      try {
+        await this.destroyBot();
+        await new Promise(resolve => setTimeout(resolve, 1000)); // 额外等待1秒
+        await this.initializeBot();
+      } catch (error) {
+        this.logger.error(`重连失败: ${error.message}`);
+        this.connectionStatus = BotConnectionStatus.ERROR;
+        // 如果重连失败，继续调度下一次重连
+        this.scheduleReconnect();
+      }
+    }, delay);
+  }
+
+  /**
+   * 清理重连超时
+   */
+  private clearReconnectTimeout(): void {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
   }
 }

@@ -6,6 +6,7 @@ export enum BotConnectionStatus {
   CONNECTING = 'connecting',
   CONNECTED = 'connected',
   ERROR = 'error',
+  RECONNECTING = 'reconnecting',
 }
 
 /**
