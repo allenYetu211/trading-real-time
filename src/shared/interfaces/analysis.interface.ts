@@ -56,4 +56,17 @@ export interface ComprehensiveAnalysis {
   
   // 分析总结
   summary: string;
+}
+
+/**
+ * 核心技术分析结果接口
+ * 包含所有子分析的完整结果
+ */
+export interface CoreTechnicalAnalysisResult {
+  symbol: string;
+  timestamp: number;
+  emaAnalysis: any; // EMA分析结果
+  emaDetailedData: any; // 详细EMA数据，包含100根K线数据
+  trendAnalysis: any; // 多时间周期趋势分析结果
+  srAnalysis: any; // 支撑阻力位分析结果
 } 

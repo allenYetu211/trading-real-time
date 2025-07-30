@@ -9,6 +9,7 @@ import { CCXTDataService } from '../../ccxt-analysis/services/ccxt-data.service'
 // 技术分析服务
 import { MultiTimeframeTrendService } from '../../technical-analysis/services/multi-timeframe-trend.service';
 import { SupportResistanceService } from '../../technical-analysis/services/support-resistance.service';
+import { CoreTechnicalAnalysisService } from '../../technical-analysis/services/core-technical-analysis.service';
 
 // 接口和类型
 interface TelegramConfig {
@@ -63,6 +64,7 @@ export class TelegramCCXTAnalysisService implements OnModuleInit {
     private readonly ccxtDataService: CCXTDataService,
     private readonly multiTimeframeTrendService: MultiTimeframeTrendService,
     private readonly supportResistanceService: SupportResistanceService,
+    private readonly coreTechnicalAnalysisService: CoreTechnicalAnalysisService,
   ) {
     this.config = this.configService.get<TelegramConfig>('telegram')!;
   }
@@ -1064,16 +1066,16 @@ ${this.getDetailedAdvice(analysis, detailedData)}
   }
 
   /**
-   * 执行趋势分析
+   * 执行趋势分析（基于核心服务）
    */
-  async performTrendAnalysis(symbol: string, chatId?: number): Promise<void> {
+  async performTrendAnalysisFromCore(symbol: string, chatId?: number): Promise<void> {
     const targetChatId = chatId || parseInt(this.config.chatId);
 
     try {
       await this.sendMessage(targetChatId, `⏳ 正在进行 ${symbol} 多时间周期趋势分析...`);
 
-      // 获取趋势分析结果
-      const trendAnalysis = await this.multiTimeframeTrendService.analyzeMultiTimeframeTrend(symbol);
+      // 使用核心服务获取趋势分析结果
+      const trendAnalysis = await this.coreTechnicalAnalysisService.getTrendAnalysis(symbol);
 
       const message = this.formatTrendAnalysisMessage(symbol, trendAnalysis);
       await this.sendMessage(targetChatId, message);
@@ -1085,16 +1087,16 @@ ${this.getDetailedAdvice(analysis, detailedData)}
   }
 
   /**
-   * 执行支撑阻力位分析
+   * 执行支撑阻力位分析（基于核心服务）
    */
-  async performSupportResistanceAnalysis(symbol: string, chatId?: number): Promise<void> {
+  async performSupportResistanceAnalysisFromCore(symbol: string, chatId?: number): Promise<void> {
     const targetChatId = chatId || parseInt(this.config.chatId);
 
     try {
       await this.sendMessage(targetChatId, `⏳ 正在进行 ${symbol} 支撑阻力位分析...`);
 
-      // 获取支撑阻力位分析结果
-      const srAnalysis = await this.supportResistanceService.analyzeSupportResistance(symbol);
+      // 使用核心服务获取支撑阻力位分析结果
+      const srAnalysis = await this.coreTechnicalAnalysisService.getSupportResistanceAnalysis(symbol);
 
       const message = this.formatSupportResistanceMessage(symbol, srAnalysis);
       await this.sendMessage(targetChatId, message);
@@ -1103,6 +1105,20 @@ ${this.getDetailedAdvice(analysis, detailedData)}
       this.logger.error(`支撑阻力位分析失败 ${symbol}:`, error);
       await this.sendMessage(targetChatId, `❌ ${symbol} 支撑阻力位分析失败: ${error.message}`);
     }
+  }
+
+  /**
+   * 执行趋势分析（保留原有方法作为兼容性）
+   */
+  async performTrendAnalysis(symbol: string, chatId?: number): Promise<void> {
+    await this.performTrendAnalysisFromCore(symbol, chatId);
+  }
+
+  /**
+   * 执行支撑阻力位分析（保留原有方法作为兼容性）
+   */
+  async performSupportResistanceAnalysis(symbol: string, chatId?: number): Promise<void> {
+    await this.performSupportResistanceAnalysisFromCore(symbol, chatId);
   }
 
   /**
@@ -1116,29 +1132,24 @@ ${this.getDetailedAdvice(analysis, detailedData)}
 
       // 根据分析类型执行不同的分析
       if (analysisType === 'trend') {
-        await this.performTrendAnalysis(symbol, targetChatId);
+        await this.performTrendAnalysisFromCore(symbol, targetChatId);
         return;
       }
 
       if (analysisType === 'support_resistance') {
-        await this.performSupportResistanceAnalysis(symbol, targetChatId);
+        await this.performSupportResistanceAnalysisFromCore(symbol, targetChatId);
         return;
       }
 
-      // 完整分析：并行执行所有分析功能 (使用100根K线，约4-5个月数据)
-      const [emaAnalysis, emaDetailedData, trendAnalysis, srAnalysis] = await Promise.all([
-        this.emaAnalysisService.analyzeEMA(symbol, '1d', [20, 60, 120]),
-        this.emaAnalysisService.getDetailedEMAData(symbol, '1d', [20, 60, 120], 100),
-        this.multiTimeframeTrendService.analyzeMultiTimeframeTrend(symbol),
-        this.supportResistanceService.analyzeSupportResistance(symbol),
-      ]);
+      // 完整分析：使用核心技术分析服务
+      const coreResult = await this.coreTechnicalAnalysisService.performComprehensiveAnalysis(symbol);
 
       const message = this.formatFullComprehensiveAnalysisMessage(
         symbol, 
-        emaAnalysis, 
-        emaDetailedData, 
-        trendAnalysis, 
-        srAnalysis
+        coreResult.emaAnalysis, 
+        coreResult.emaDetailedData, 
+        coreResult.trendAnalysis, 
+        coreResult.srAnalysis
       );
       await this.sendMessage(targetChatId, message);
 
@@ -1237,18 +1248,20 @@ ${this.getActionEmoji(tradingSuggestion.action)} <b>${this.getActionDescription(
 
     message += `• 价格行为: ${this.getPriceActionDescription(currentPosition.priceAction)}\n`;
 
-    // 添加交易区间建议
-    if (tradingZones.buyZones.length > 0) {
-      message += `\n💚 <b>买入区间:</b>\n`;
-      tradingZones.buyZones.slice(0, 3).forEach((zone: any) => {
-        message += `• $${this.formatPrice(zone.priceRange.min)} - $${this.formatPrice(zone.priceRange.max)} (${zone.strength})\n`;
+    // 生成精确交易区间建议（与完整技术分析保持一致）
+    const preciseTradingZones = this.generatePreciseTradingZones(analysis, currentPrice);
+    
+    if (preciseTradingZones.buyZones.length > 0) {
+      message += `\n💚 <b>精确买入区间:</b>\n`;
+      preciseTradingZones.buyZones.forEach((zone: any) => {
+        message += `• $${this.formatPrice(zone.entry)} (±$${this.formatPrice(zone.tolerance)}) [${zone.confidence}%]\n`;
       });
     }
 
-    if (tradingZones.sellZones.length > 0) {
-      message += `\n🔴 <b>卖出区间:</b>\n`;
-      tradingZones.sellZones.slice(0, 3).forEach((zone: any) => {
-        message += `• $${this.formatPrice(zone.priceRange.min)} - $${this.formatPrice(zone.priceRange.max)} (${zone.strength})\n`;
+    if (preciseTradingZones.sellZones.length > 0) {
+      message += `\n🔴 <b>精确卖出区间:</b>\n`;
+      preciseTradingZones.sellZones.forEach((zone: any) => {
+        message += `• $${this.formatPrice(zone.entry)} (±$${this.formatPrice(zone.tolerance)}) [${zone.confidence}%]\n`;
       });
     }
 

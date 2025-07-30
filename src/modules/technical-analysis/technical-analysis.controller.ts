@@ -2,6 +2,7 @@ import { Controller, Post, Body, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { MultiTimeframeTrendService } from './services/multi-timeframe-trend.service';
 import { SupportResistanceService } from './services/support-resistance.service';
+import { CoreTechnicalAnalysisService } from './services/core-technical-analysis.service';
 import { 
   TechnicalAnalysisRequestDto,
   MultiTimeframeTrendRequestDto,
@@ -23,6 +24,7 @@ export class TechnicalAnalysisController {
   constructor(
     private readonly multiTimeframeTrendService: MultiTimeframeTrendService,
     private readonly supportResistanceService: SupportResistanceService,
+    private readonly coreTechnicalAnalysisService: CoreTechnicalAnalysisService,
   ) {}
 
   /**
@@ -43,10 +45,8 @@ export class TechnicalAnalysisController {
     const { symbol, exchange = 'binance' } = body;
 
     try {
-      const result = await this.multiTimeframeTrendService.analyzeMultiTimeframeTrend(
-        symbol,
-        exchange,
-      );
+      // 使用核心服务获取趋势分析结果，确保数据一致性
+      const result = await this.coreTechnicalAnalysisService.getTrendAnalysis(symbol, exchange);
 
       this.logger.log(`多时间周期趋势分析完成: ${symbol} - ${result.overallTrend}`);
       return result as any;
@@ -75,10 +75,8 @@ export class TechnicalAnalysisController {
     const { symbol, exchange = 'binance' } = body;
 
     try {
-      const result = await this.supportResistanceService.analyzeSupportResistance(
-        symbol,
-        exchange,
-      );
+      // 使用核心服务获取支撑阻力位分析结果，确保数据一致性
+      const result = await this.coreTechnicalAnalysisService.getSupportResistanceAnalysis(symbol, exchange);
 
       this.logger.log(`支撑阻力位分析完成: ${symbol}, 找到${result.allLevels.supports.length}个支撑位，${result.allLevels.resistances.length}个阻力位`);
       return result as any;
@@ -107,23 +105,20 @@ export class TechnicalAnalysisController {
     const { symbol, exchange = 'binance' } = body;
 
     try {
-      // 并行执行趋势分析和支撑阻力位分析
-      const [trendAnalysis, supportResistanceAnalysis] = await Promise.all([
-        this.multiTimeframeTrendService.analyzeMultiTimeframeTrend(symbol, exchange),
-        this.supportResistanceService.analyzeSupportResistance(symbol, exchange),
-      ]);
+      // 使用核心服务执行完整技术分析，确保数据一致性
+      const coreResult = await this.coreTechnicalAnalysisService.performComprehensiveAnalysis(symbol, exchange);
 
       // 生成综合评估
       const overallAssessment = this.generateOverallAssessment(
-        trendAnalysis,
-        supportResistanceAnalysis,
+        coreResult.trendAnalysis,
+        coreResult.srAnalysis,
       );
 
       const result: TechnicalAnalysisResponseDto = {
         symbol,
-        timestamp: Date.now(),
-        trendAnalysis: trendAnalysis as any,
-        supportResistanceAnalysis: supportResistanceAnalysis as any,
+        timestamp: coreResult.timestamp,
+        trendAnalysis: coreResult.trendAnalysis as any,
+        supportResistanceAnalysis: coreResult.srAnalysis as any,
         overallAssessment,
       };
 

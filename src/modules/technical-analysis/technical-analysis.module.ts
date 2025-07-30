@@ -9,6 +9,7 @@ import { TechnicalAnalysisController } from './technical-analysis.controller';
 // Services
 import { MultiTimeframeTrendService } from './services/multi-timeframe-trend.service';
 import { SupportResistanceService } from './services/support-resistance.service';
+import { CoreTechnicalAnalysisService } from './services/core-technical-analysis.service';
 
 /**
  * 技术分析模块
@@ -22,10 +23,12 @@ import { SupportResistanceService } from './services/support-resistance.service'
   providers: [
     MultiTimeframeTrendService,
     SupportResistanceService,
+    CoreTechnicalAnalysisService,
   ],
   exports: [
     MultiTimeframeTrendService,
     SupportResistanceService,
+    CoreTechnicalAnalysisService,
   ],
 })
 export class TechnicalAnalysisModule {} 
