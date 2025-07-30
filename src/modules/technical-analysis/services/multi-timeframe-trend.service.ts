@@ -8,6 +8,7 @@ import {
   TrendType,
   IKlineData 
 } from '../interfaces';
+import { IMarketDataCollection } from 'src/shared/interfaces/analysis.interface';
 
 /**
  * 多时间周期趋势分析服务
@@ -18,6 +19,71 @@ export class MultiTimeframeTrendService {
   private readonly logger = new Logger(MultiTimeframeTrendService.name);
 
   constructor(private readonly ccxtDataService: CCXTDataService) {}
+
+  /**
+   * 分析多时间周期趋势 - 使用预获取数据的重载方法
+   * @param symbol 交易对符号
+   * @param marketData 预获取的市场数据
+   */
+  async analyzeMultiTimeframeTrendWithPrefetchedData(
+    symbol: string,
+    marketData: IMarketDataCollection,
+  ): Promise<IMultiTimeframeTrend> {
+    this.logger.log(`使用预获取数据分析${symbol}的多时间周期趋势`);
+
+    try {
+      // 定义时间周期和对应的数据
+      const timeframes: TimeframeType[] = ['15m', '1h', '4h', '1d'];
+      
+      // 并行分析所有时间周期的趋势，使用预获取的数据
+      const trendPromises = timeframes.map(timeframe => 
+        this.analyzeSingleTimeframeTrendWithPrefetchedData(symbol, timeframe, marketData)
+      );
+
+      const trendResults = await Promise.all(trendPromises);
+
+      // 构建时间周期趋势映射
+      const timeframeTrends = {
+        '15m': trendResults[0],
+        '1h': trendResults[1],
+        '4h': trendResults[2],
+        '1d': trendResults[3],
+      };
+
+      // 分析趋势一致性
+      const trendAlignment = this.analyzeTrendAlignment(timeframeTrends);
+
+      // 计算整体趋势
+      const overallTrend = this.calculateOverallTrend(timeframeTrends);
+
+      // 计算整体置信度
+      const overallConfidence = this.calculateOverallConfidence(timeframeTrends, trendAlignment);
+
+      // 生成交易建议
+      const tradingSuggestion = this.generateTradingSuggestion(
+        timeframeTrends,
+        trendAlignment,
+        overallTrend,
+      );
+
+      const result: IMultiTimeframeTrend = {
+        symbol,
+        timestamp: Date.now(),
+        overallTrend,
+        overallConfidence,
+        timeframes: timeframeTrends,
+        trendAlignment,
+        tradingSuggestion,
+      };
+
+      this.logger.log(`使用预获取数据的多时间周期趋势分析完成: ${symbol} - ${overallTrend}`);
+      return result;
+
+    } catch (error) {
+      this.logger.error(`使用预获取数据的多时间周期趋势分析失败: ${error.message}`);
+      throw new Error(`使用预获取数据的多时间周期趋势分析失败: ${error.message}`);
+    }
+  }
 
   /**
    * 分析多时间周期趋势
@@ -79,6 +145,63 @@ export class MultiTimeframeTrendService {
     } catch (error) {
       this.logger.error(`多时间周期趋势分析失败: ${error.message}`);
       throw new Error(`多时间周期趋势分析失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 分析单个时间周期的趋势 - 使用预获取数据的方法
+   * @param symbol 交易对符号
+   * @param timeframe 时间周期
+   * @param marketData 预获取的市场数据
+   */
+  private async analyzeSingleTimeframeTrendWithPrefetchedData(
+    symbol: string,
+    timeframe: TimeframeType,
+    marketData: IMarketDataCollection,
+  ): Promise<ITimeframeTrend> {
+    try {
+      // 从预获取的数据中获取对应时间周期的数据
+      const klineData = marketData.timeframes[timeframe];
+      
+      if (!klineData || klineData.length < 200) {
+        throw new Error(`预获取数据中${timeframe}时间周期数据不足，需要至少200根K线`);
+      }
+
+      const closePrices = klineData.map(k => k.close);
+      const currentPrice = closePrices[closePrices.length - 1];
+
+      // 计算EMA
+      const ema20Values = MathUtil.calculateEMA(closePrices, 20);
+      const ema60Values = MathUtil.calculateEMA(closePrices, 60);
+      const ema120Values = MathUtil.calculateEMA(closePrices, 120);
+
+      const ema20 = ema20Values[ema20Values.length - 1];
+      const ema60 = ema60Values[ema60Values.length - 1];
+      const ema120 = ema120Values[ema120Values.length - 1];
+
+      // 分析趋势
+      const trend = this.determineTrend(currentPrice, ema20, ema60, ema120, closePrices);
+      const trendStrength = this.calculateTrendStrength(currentPrice, ema20, ema60, ema120, closePrices);
+      const confidence = this.calculateTrendConfidence(trend, trendStrength, closePrices);
+      const divergence = this.detectDivergence(closePrices, ema20Values);
+      const analysis = this.generateTrendAnalysis(trend, trendStrength, confidence, divergence, timeframe);
+
+      return {
+        timeframe,
+        trend,
+        confidence: Math.round(confidence),
+        currentPrice,
+        ema20,
+        ema60,
+        ema120,
+        trendStrength: Math.round(trendStrength),
+        divergence,
+        analysis,
+      };
+
+    } catch (error) {
+      this.logger.error(`使用预获取数据的${timeframe}趋势分析失败: ${error.message}`);
+      throw error;
     }
   }
 

@@ -8,6 +8,7 @@ import {
   LevelStrength,
   IKlineData 
 } from '../interfaces';
+import { IMarketDataCollection } from 'src/shared/interfaces/analysis.interface';
 
 /**
  * 支撑阻力位分析服务
@@ -18,6 +19,88 @@ export class SupportResistanceService {
   private readonly logger = new Logger(SupportResistanceService.name);
 
   constructor(private readonly ccxtDataService: CCXTDataService) {}
+
+  /**
+   * 分析支撑阻力位 - 使用预获取数据的重载方法
+   * @param symbol 交易对符号
+   * @param marketData 预获取的市场数据
+   */
+  async analyzeSupportResistanceWithPrefetchedData(
+    symbol: string,
+    marketData: IMarketDataCollection,
+  ): Promise<ISupportResistanceAnalysis> {
+    this.logger.log(`使用预获取数据分析${symbol}的支撑阻力位`);
+
+    try {
+      // 从预获取数据中获取各时间周期的数据
+      const data15m = marketData.timeframes['15m'];
+      const data1h = marketData.timeframes['1h'];
+      const data4h = marketData.timeframes['4h'];
+      const data1d = marketData.timeframes['1d'];
+
+      // 验证数据完整性
+      if (!data15m || !data1h || !data4h || !data1d) {
+        throw new Error('预获取数据中缺少必要的时间周期数据');
+      }
+
+      const currentPrice = data15m[data15m.length - 1].close;
+
+      // 从不同时间周期识别支撑阻力位
+      const allLevels: ISupportResistanceLevel[] = [];
+
+      // 日线级别的关键位置 (权重最高)
+      const dailyLevels = this.identifyLevelsFromKlineData(data1d, '1d', currentPrice);
+      allLevels.push(...dailyLevels);
+
+      // 4小时级别
+      const h4Levels = this.identifyLevelsFromKlineData(data4h, '4h', currentPrice);
+      allLevels.push(...h4Levels);
+
+      // 1小时级别
+      const h1Levels = this.identifyLevelsFromKlineData(data1h, '1h', currentPrice);
+      allLevels.push(...h1Levels);
+
+      // 15分钟级别 (近期精确位置)
+      const m15Levels = this.identifyLevelsFromKlineData(data15m, '15m', currentPrice);
+      allLevels.push(...m15Levels);
+
+      // 合并和过滤重复的位置
+      const consolidatedLevels = this.consolidateLevels(allLevels, currentPrice);
+
+      // 按类型分组
+      const supports = consolidatedLevels.filter(level => level.type === 'SUPPORT');
+      const resistances = consolidatedLevels.filter(level => level.type === 'RESISTANCE');
+
+      // 找到关键位置
+      const keyLevels = this.identifyKeyLevels(supports, resistances, currentPrice);
+
+      // 分析当前位置
+      const currentPosition = this.analyzeCurrentPosition(supports, resistances, currentPrice);
+
+      // 生成交易区间
+      const tradingZones = this.generateTradingZones(supports, resistances, currentPrice);
+
+      const result: ISupportResistanceAnalysis = {
+        symbol,
+        currentPrice,
+        timestamp: Date.now(),
+        keyLevels,
+        allLevels: {
+          supports: supports.sort((a, b) => b.priceRange.center - a.priceRange.center),
+          resistances: resistances.sort((a, b) => a.priceRange.center - b.priceRange.center),
+        },
+        currentPosition,
+        tradingZones,
+      };
+
+      this.logger.log(`使用预获取数据的支撑阻力位分析完成: ${symbol}, 发现${supports.length}个支撑位，${resistances.length}个阻力位`);
+      return result;
+
+    } catch (error) {
+      this.logger.error(`使用预获取数据的支撑阻力位分析失败: ${error.message}`);
+      throw new Error(`使用预获取数据的支撑阻力位分析失败: ${error.message}`);
+    }
+  }
 
   /**
    * 分析支撑阻力位

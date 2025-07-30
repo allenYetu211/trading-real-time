@@ -1,4 +1,5 @@
 import { IntervalType, SignalType } from '../enums';
+import { IOHLCVData } from '../../modules/ccxt-analysis/interfaces';
 
 export interface IndicatorResult {
   timestamp: number;
@@ -71,4 +72,29 @@ export interface CoreTechnicalAnalysisResult {
   srAnalysis: any; // 支撑阻力位分析结果
   rsiAnalysis?: any; // RSI分析结果（可选）
   openInterestData?: any; // 持仓量数据（可选，仅适用于期货）
+} 
+
+/**
+ * 市场数据集合接口
+ * 用于预获取和统一管理多时间周期的OHLCV数据
+ */
+export interface IMarketDataCollection {
+  symbol: string;
+  exchange: string;
+  timestamp: number;
+  timeframes: {
+    '1d': IOHLCVData[];
+    '4h': IOHLCVData[];
+    '1h': IOHLCVData[];
+    '15m': IOHLCVData[];
+  };
+}
+
+/**
+ * 数据获取配置接口
+ */
+export interface IDataFetchConfig {
+  timeframe: string;
+  limit: number;
+  required: boolean; // 是否为必需数据
 } 

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CCXTDataService } from './ccxt-data.service';
 import { IOHLCVData, IRSIData, IRSIAnalysis, IMultiTimeframeRSI } from '../interfaces';
+import { IMarketDataCollection } from 'src/shared/interfaces/analysis.interface';
 
 /**
  * RSI分析服务
@@ -82,6 +83,102 @@ export class RSIAnalysisService {
     }
 
     return { signal, strength };
+  }
+
+  /**
+   * 获取RSI分析 - 使用预获取数据的重载方法
+   * @param symbol 交易对符号
+   * @param timeframe 时间周期
+   * @param period RSI周期
+   * @param marketData 预获取的市场数据
+   */
+  async getRSIAnalysisWithPrefetchedData(
+    symbol: string,
+    timeframe: string = '1h',
+    period: number = 14,
+    marketData: IMarketDataCollection,
+  ): Promise<IRSIAnalysis> {
+    try {
+      this.logger.log(`使用预获取数据进行RSI分析: ${symbol}, 时间周期: ${timeframe}, RSI周期: ${period}`);
+
+      // 从预获取数据中获取对应时间周期的数据
+      const ohlcvData = marketData.timeframes[timeframe as keyof typeof marketData.timeframes];
+
+      if (!ohlcvData || ohlcvData.length < period + 1) {
+        throw new Error(`预获取数据不足，需要至少 ${period + 1} 个数据点进行RSI计算`);
+      }
+
+      // 提取收盘价
+      const closePrices = ohlcvData.map(candle => candle.close);
+      
+      // 计算RSI
+      const rsiValues = this.calculateRSI(closePrices, period);
+      
+      // 获取最新的RSI数据
+      const latestIndex = rsiValues.length - 1;
+      const previousIndex = Math.max(0, latestIndex - 1);
+
+      const currentRSIValue = rsiValues[latestIndex];
+      const previousRSIValue = rsiValues[previousIndex];
+
+      const currentSignal = this.parseRSISignal(currentRSIValue);
+      const previousSignal = this.parseRSISignal(previousRSIValue);
+
+      const currentRSI: IRSIData = {
+        timestamp: ohlcvData[ohlcvData.length - 1].timestamp,
+        datetime: ohlcvData[ohlcvData.length - 1].datetime,
+        rsi: currentRSIValue,
+        signal: currentSignal.signal,
+        strength: currentSignal.strength,
+      };
+
+      const previousRSI: IRSIData = {
+        timestamp: ohlcvData[ohlcvData.length - 2]?.timestamp || currentRSI.timestamp,
+        datetime: ohlcvData[ohlcvData.length - 2]?.datetime || currentRSI.datetime,
+        rsi: previousRSIValue,
+        signal: previousSignal.signal,
+        strength: previousSignal.strength,
+      };
+
+      // 确定趋势
+      const trend = this.determineTrend(currentRSIValue, previousRSIValue);
+      
+      // 生成交易信号
+      const signal = this.generateTradingSignal(currentRSI, previousRSI);
+      
+      // 检测背离
+      const divergence = this.detectDivergence(
+        ohlcvData.slice(-10),
+        rsiValues.slice(-10)
+      );
+
+      // 生成建议和风险评估
+      const { recommendation, riskLevel } = this.generateRecommendation(
+        currentRSI,
+        trend,
+        signal,
+        divergence
+      );
+
+      const analysis: IRSIAnalysis = {
+        symbol,
+        period,
+        currentRSI,
+        previousRSI,
+        trend,
+        signal,
+        divergence,
+        recommendation,
+        riskLevel,
+      };
+
+      this.logger.log(`使用预获取数据的RSI分析完成: ${symbol}, 当前RSI: ${currentRSIValue.toFixed(2)}, 信号: ${signal}`);
+
+      return analysis;
+    } catch (error) {
+      this.logger.error(`使用预获取数据的RSI分析失败: ${error.message}`);
+      throw new Error(`使用预获取数据的RSI分析失败: ${error.message}`);
+    }
   }
 
   /**

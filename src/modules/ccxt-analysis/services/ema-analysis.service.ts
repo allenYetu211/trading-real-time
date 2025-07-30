@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CCXTDataService } from './ccxt-data.service';
 import { MathUtil } from 'src/shared/utils/math.util';
 import { IOHLCVData, IEMAAnalysis } from '../interfaces';
+import { IMarketDataCollection } from 'src/shared/interfaces/analysis.interface';
 
 /**
  * EMA分析服务
@@ -90,6 +91,75 @@ export class EMAAnalysisService {
   }
 
   /**
+   * 分析EMA指标 - 使用预获取数据的重载方法
+   * @param symbol 交易对符号
+   * @param timeframe 时间周期
+   * @param periods EMA周期数组
+   * @param marketData 预获取的市场数据
+   */
+  async analyzeEMAWithPrefetchedData(
+    symbol: string,
+    timeframe: string = '1d',
+    periods: number[] = [20, 60, 120],
+    marketData: IMarketDataCollection,
+  ): Promise<IEMAAnalysis> {
+    try {
+      this.logger.log(`使用预获取数据分析${symbol}的EMA指标，周期：${periods.join(',')}`);
+
+      // 从预获取的数据中获取对应时间周期的数据
+      const ohlcvData = marketData.timeframes[timeframe as keyof typeof marketData.timeframes];
+      
+      if (!ohlcvData || ohlcvData.length < Math.max(...periods)) {
+        throw new Error(`预获取数据不足，需要至少${Math.max(...periods)}根K线`);
+      }
+
+      // 提取收盘价数组
+      const closePrices = ohlcvData.map(candle => candle.close);
+      const currentPrice = closePrices[closePrices.length - 1];
+
+      // 计算各周期EMA
+      const emaResults: Record<string, number> = {};
+      for (const period of periods) {
+        const emaValues = MathUtil.calculateEMA(closePrices, period);
+        emaResults[`ema${period}`] = emaValues[emaValues.length - 1];
+      }
+
+      // 分析趋势
+      const trend = this.analyzeTrend(
+        currentPrice,
+        emaResults.ema20 || 0,
+        emaResults.ema60 || 0,
+        emaResults.ema120 || 0,
+      );
+
+      // 计算趋势置信度
+      const trendConfidence = this.calculateTrendConfidence(
+        currentPrice,
+        emaResults.ema20 || 0,
+        emaResults.ema60 || 0,
+        emaResults.ema120 || 0,
+        closePrices,
+      );
+
+      const result: IEMAAnalysis = {
+        ema20: emaResults.ema20 || 0,
+        ema60: emaResults.ema60 || 0,
+        ema120: emaResults.ema120 || 0,
+        currentPrice,
+        trend,
+        trendConfidence,
+      };
+
+      this.logger.log(`使用预获取数据的EMA分析完成：${JSON.stringify(result)}`);
+      return result;
+
+    } catch (error) {
+      this.logger.error(`使用预获取数据的EMA分析失败: ${error.message}`);
+      throw new Error(`使用预获取数据的EMA分析失败: ${error.message}`);
+    }
+  }
+
+  /**
    * 获取详细的EMA数据用于调试
    * @param symbol 交易对符号
    * @param timeframe 时间周期
@@ -154,6 +224,71 @@ export class EMAAnalysisService {
     } catch (error) {
       this.logger.error(`获取详细EMA数据失败: ${error.message}`);
       throw new Error(`获取详细EMA数据失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 获取详细的EMA数据用于调试 - 使用预获取数据的重载方法
+   * @param symbol 交易对符号
+   * @param timeframe 时间周期
+   * @param periods EMA周期数组
+   * @param marketData 预获取的市场数据
+   */
+  async getDetailedEMADataWithPrefetchedData(
+    symbol: string,
+    timeframe: string = '1d',
+    periods: number[] = [20, 60, 120],
+    marketData: IMarketDataCollection,
+  ) {
+    try {
+      // 从预获取的数据中获取对应时间周期的数据
+      const ohlcvData = marketData.timeframes[timeframe as keyof typeof marketData.timeframes];
+
+      if (!ohlcvData || ohlcvData.length === 0) {
+        throw new Error(`预获取数据中缺少${timeframe}时间周期的数据`);
+      }
+
+      const closePrices = ohlcvData.map(candle => candle.close);
+
+      // 计算所有EMA
+      const emaResults: Record<string, number[]> = {};
+      const latestEMA: Record<string, number> = {};
+
+      for (const period of periods) {
+        const emaValues = MathUtil.calculateEMA(closePrices, period);
+        emaResults[`ema${period}`] = emaValues;
+        latestEMA[`ema${period}`] = emaValues[emaValues.length - 1];
+      }
+
+      return {
+        symbol,
+        timeframe,
+        exchange: marketData.exchange,
+        dataSource: 'prefetched',
+        totalCount: ohlcvData.length,
+        latestPrice: closePrices[closePrices.length - 1],
+        recent10Prices: closePrices.slice(-10),
+        priceRange: {
+          min: Math.min(...closePrices),
+          max: Math.max(...closePrices),
+        },
+        emaResults: latestEMA,
+        fullEMAHistory: emaResults,
+        firstDataPoint: {
+          timestamp: ohlcvData[0].timestamp,
+          datetime: ohlcvData[0].datetime,
+          price: ohlcvData[0].close,
+        },
+        lastDataPoint: {
+          timestamp: ohlcvData[ohlcvData.length - 1].timestamp,
+          datetime: ohlcvData[ohlcvData.length - 1].datetime,
+          price: ohlcvData[ohlcvData.length - 1].close,
+        },
+      };
+
+    } catch (error) {
+      this.logger.error(`使用预获取数据获取详细EMA数据失败: ${error.message}`);
+      throw new Error(`使用预获取数据获取详细EMA数据失败: ${error.message}`);
     }
   }
 
