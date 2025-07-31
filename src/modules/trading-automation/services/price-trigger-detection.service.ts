@@ -74,13 +74,25 @@ export class PriceTriggerDetectionService {
       this.cleanupZoneFlags(symbol, currentPrice, sellZones, 'SELL');
 
       // 检查买入区间触发和穿越
+      let hasTriggered = false;
       for (const buyZone of buyZones) {
-        await this.checkZoneStateChange(symbol, 'BUY', currentPrice, buyZone);
+        const triggered = await this.checkZoneStateChange(symbol, 'BUY', currentPrice, buyZone);
+        if (triggered) {
+          hasTriggered = true;
+          break; // 立即停止检查其他买入区间
+        }
       }
 
-      // 检查卖出区间触发和穿越
-      for (const sellZone of sellZones) {
-        await this.checkZoneStateChange(symbol, 'SELL', currentPrice, sellZone);
+      // 如果买入信号已触发，跳过卖出信号检查以避免同时发送多个信号
+      if (!hasTriggered) {
+        // 检查卖出区间触发和穿越
+        for (const sellZone of sellZones) {
+          const triggered = await this.checkZoneStateChange(symbol, 'SELL', currentPrice, sellZone);
+          if (triggered) {
+            hasTriggered = true;
+            break; // 立即停止检查其他卖出区间
+          }
+        }
       }
 
     } catch (error) {
@@ -110,7 +122,7 @@ export class PriceTriggerDetectionService {
     triggerType: 'BUY' | 'SELL',
     currentPrice: number,
     zone: TradingZone
-  ): Promise<void> {
+  ): Promise<boolean> {
     const zoneKey = `${triggerType}_${zone.price}`;
     const symbolStateMap = this.getOrCreateZoneStateMap(symbol);
     
@@ -123,19 +135,24 @@ export class PriceTriggerDetectionService {
     if (!wasInZone && isInZone) {
       // 进入区间
       this.logger.log(`${symbol} 价格 ${currentPrice} 进入${triggerType === 'BUY' ? '买入' : '卖出'}区间 ${zone.price} (±${zone.tolerance})`);
-      await this.handleZoneTrigger(symbol, triggerType, currentPrice, zone);
+      const triggered = await this.handleZoneTrigger(symbol, triggerType, currentPrice, zone);
       await this.handleZoneCrossing(symbol, triggerType, currentPrice, zone, 'ENTER');
+      return triggered;
     } else if (wasInZone && !isInZone) {
       // 离开区间
       this.logger.log(`${symbol} 价格 ${currentPrice} 离开${triggerType === 'BUY' ? '买入' : '卖出'}区间 ${zone.price} (±${zone.tolerance})`);
       await this.handleZoneCrossing(symbol, triggerType, currentPrice, zone, 'EXIT');
+      return false;
     } else if (isInZone) {
       // 仍在区间内，检查是否需要重新触发
       if (this.shouldRetriggerZone(symbol, triggerType, zone.price)) {
         this.logger.log(`${symbol} 价格 ${currentPrice} 重新触发${triggerType === 'BUY' ? '买入' : '卖出'}区间 ${zone.price} (±${zone.tolerance})`);
-        await this.handleZoneTrigger(symbol, triggerType, currentPrice, zone);
+        const triggered = await this.handleZoneTrigger(symbol, triggerType, currentPrice, zone);
+        return triggered;
       }
     }
+    
+    return false;
   }
 
   /**
@@ -229,11 +246,11 @@ export class PriceTriggerDetectionService {
     triggerType: 'BUY' | 'SELL',
     currentPrice: number,
     zone: TradingZone
-  ): Promise<void> {
+  ): Promise<boolean> {
     // 检查是否已经在当前区间内触发过
     if (this.hasTriggeredInCurrentZone(symbol, triggerType, zone)) {
       this.logger.debug(`${symbol} ${triggerType} 区间 ${zone.price} 已经触发过，跳过重复通知`);
-      return;
+      return false;
     }
 
     const triggerKey = `${symbol}_${triggerType}_${zone.price}`;
@@ -241,7 +258,7 @@ export class PriceTriggerDetectionService {
     // 检查冷却时间
     if (this.isInCooldown(triggerKey)) {
       this.logger.debug(`${triggerKey} 在冷却期内，跳过通知`);
-      return;
+      return false;
     }
 
     try {
@@ -267,12 +284,15 @@ export class PriceTriggerDetectionService {
       // 记录触发历史
       this.recordTrigger(triggerKey);
 
-      this.logger.log(
-        `价格触发已记录: ${symbol} ${triggerType} 区间 ${zone.price} (±${zone.tolerance})，当前价格: ${currentPrice}`
-      );
+      // this.logger.log(
+      //   `价格触发已记录: ${symbol} ${triggerType} 区间 ${zone.price} (±${zone.tolerance})，当前价格: ${currentPrice}`
+      // );
+
+      return true;
 
     } catch (error) {
       this.logger.error(`处理价格触发失败: ${error.message}`);
+      return false;
     }
   }
 

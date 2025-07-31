@@ -54,6 +54,9 @@ export class TradingNotificationService {
     // 计算价格偏差
     const priceDeviation = ((currentPrice - targetPrice) / targetPrice * 100).toFixed(2);
     
+    // 计算容差百分比（tolerance是绝对价格值，需要转换为百分比）
+    const tolerancePercentage = ((tolerance / targetPrice) * 100).toFixed(2);
+    
     const message = `
 🎯 <b>${actionText}</b> ${typeIcon}
 
@@ -61,7 +64,7 @@ export class TradingNotificationService {
 💰 <b>当前价格:</b> $${currentPrice.toFixed(6)}
 🎯 <b>目标价格:</b> $${targetPrice.toFixed(6)}
 📈 <b>偏差:</b> ${priceDeviation}%
-⚡ <b>容差:</b> ${(tolerance * 100).toFixed(2)}%
+⚡ <b>容差:</b> ±${tolerancePercentage}%
 🎯 <b>置信度:</b> ${(confidence * 100).toFixed(1)}%
 
 ⏰ <b>时间:</b> ${new Date(timestamp).toLocaleString('zh-CN')}
@@ -223,11 +226,11 @@ ${icons[status.type]} <b>系统${typeNames[status.type]}</b>
         disable_notification: false,
       });
 
-      if (result.success) {
-        this.logger.log(`区间穿越通知发送成功: ${crossingEvent.symbol} ${crossingEvent.crossingType} ${crossingEvent.triggerType}`);
-      } else {
-        this.logger.error(`区间穿越通知发送失败: ${crossingEvent.symbol} ${crossingEvent.crossingType} ${crossingEvent.triggerType} - ${result.error}`);
-      }
+      // if (result.success) {
+      //   this.logger.log(`区间穿越通知发送成功: ${crossingEvent.symbol} ${crossingEvent.crossingType} ${crossingEvent.triggerType}`);
+      // } else {
+      //   this.logger.error(`区间穿越通知发送失败: ${crossingEvent.symbol} ${crossingEvent.crossingType} ${crossingEvent.triggerType} - ${result.error}`);
+      // }
 
       return result.success;
 
@@ -252,6 +255,9 @@ ${icons[status.type]} <b>系统${typeNames[status.type]}</b>
     // 计算价格偏差
     const priceDeviation = ((currentPrice - targetPrice) / targetPrice * 100).toFixed(2);
     
+    // 计算容差百分比（tolerance是绝对价格值，需要转换为百分比）
+    const tolerancePercentage = ((tolerance / targetPrice) * 100).toFixed(2);
+    
     const message = `
 ${crossingIcon} <b>区间穿越</b> ${typeIcon}
 
@@ -260,7 +266,7 @@ ${crossingIcon} <b>区间穿越</b> ${typeIcon}
 💰 <b>当前价格:</b> $${currentPrice.toFixed(6)}
 🎯 <b>区间中心:</b> $${targetPrice.toFixed(6)}
 📈 <b>偏差:</b> ${priceDeviation}%
-⚡ <b>容差:</b> ${(tolerance * 100).toFixed(2)}%
+⚡ <b>容差:</b> ±${tolerancePercentage}%
 🎯 <b>置信度:</b> ${(confidence * 100).toFixed(1)}%
 
 ⏰ <b>时间:</b> ${new Date(timestamp).toLocaleString('zh-CN')}

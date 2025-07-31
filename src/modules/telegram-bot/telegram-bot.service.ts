@@ -239,7 +239,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         reply_markup: options?.reply_markup,
       });
 
-      this.logger.debug(`消息发送成功，消息ID: ${result.message_id}`);
+      // this.logger.debug(`消息发送成功，消息ID: ${result.message_id}`);
       
       return {
         success: true,
