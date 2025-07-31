@@ -182,9 +182,9 @@ export class RealtimePriceMonitorService implements OnModuleInit, OnModuleDestro
 
     // 检测大幅价格变动，可能错过区间穿越
     if (previousPrice && Math.abs(price - previousPrice) > 0.5) {
-      this.logger.warn(
-        `检测到 ${symbol} 大幅价格变动: ${previousPrice} -> ${price} (变动: ${(price - previousPrice).toFixed(4)})`
-      );
+      // this.logger.warn(
+      //   `检测到 ${symbol} 大幅价格变动: ${previousPrice} -> ${price} (变动: ${(price - previousPrice).toFixed(4)})`
+      // );
     }
 
     try {

@@ -48,18 +48,24 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
    */
   private async initializeBot(): Promise<void> {
     try {
+      // 详细的配置检查和日志
+      this.logger.log(`Telegram 配置检查:`);
+      this.logger.log(`- Enabled: ${this.config?.enabled}`);
+      this.logger.log(`- Bot Token: ${this.config?.botToken ? '已设置' : '未设置'}`);
+      this.logger.log(`- Chat ID: ${this.config?.chatId ? this.config.chatId : '未设置'}`);
+
       if (!this.config?.enabled) {
-        this.logger.log('Telegram 功能已禁用');
+        this.logger.warn('Telegram 功能已禁用 - 检查环境变量 TELEGRAM_ENABLED 或确保 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 都已设置');
         return;
       }
 
       if (!this.config?.botToken) {
-        this.logger.warn('Telegram Bot Token 未配置，跳过初始化');
+        this.logger.error('Telegram Bot Token 未配置 - 请设置环境变量 TELEGRAM_BOT_TOKEN');
         return;
       }
 
       if (!this.config.chatId) {
-        this.logger.warn('Telegram Chat ID 未配置，跳过初始化');
+        this.logger.error('Telegram Chat ID 未配置 - 请设置环境变量 TELEGRAM_CHAT_ID');
         return;
       }
 

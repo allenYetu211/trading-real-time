@@ -112,9 +112,12 @@ export class ScheduledAnalysisService {
       const timestamp = BigInt(Date.now());
       const currentPrice = supportResistanceAnalysis.currentPrice;
 
-      // 转换买入/卖出区间为JSON字符串
-      const buyZonesJson = JSON.stringify(supportResistanceAnalysis.tradingZones?.buyZones || []);
-      const sellZonesJson = JSON.stringify(supportResistanceAnalysis.tradingZones?.sellZones || []);
+      // 转换买入/卖出区间为TradingZone格式
+      const buyZones = this.convertToTradingZones(supportResistanceAnalysis.tradingZones?.buyZones || []);
+      const sellZones = this.convertToTradingZones(supportResistanceAnalysis.tradingZones?.sellZones || []);
+      
+      const buyZonesJson = JSON.stringify(buyZones);
+      const sellZonesJson = JSON.stringify(sellZones);
 
       // 从趋势分析中提取评分信息
       const trendAnalysis = analysisResult.trendAnalysis;
@@ -152,6 +155,77 @@ export class ScheduledAnalysisService {
   }
 
   /**
+   * 将技术分析的区间格式转换为TradingZone格式
+   */
+  private convertToTradingZones(zones: any[]): Array<{ price: number; tolerance: number; confidence: number }> {
+    return zones.map(zone => {
+      // 如果已经是TradingZone格式，直接返回
+      if (typeof zone.price === 'number' && typeof zone.tolerance === 'number') {
+        return {
+          price: zone.price,
+          tolerance: zone.tolerance,
+          confidence: zone.confidence || 0.8
+        };
+      }
+
+      // 如果是技术分析的priceRange格式，进行转换
+      if (zone.priceRange && 
+          typeof zone.priceRange.min === 'number' && 
+          typeof zone.priceRange.max === 'number') {
+        
+        // 计算中心价格
+        const center = (zone.priceRange.min + zone.priceRange.max) / 2;
+        const range = zone.priceRange.max - zone.priceRange.min;
+        const tolerance = range / 2; // 将范围的一半作为容差
+        
+        // 根据strength计算confidence
+        let confidence = 0.5;
+        if (zone.strength === 'STRONG') confidence = 0.9;
+        else if (zone.strength === 'MAJOR') confidence = 0.8;
+        else if (zone.strength === 'MEDIUM') confidence = 0.6;
+
+        return {
+          price: center,
+          tolerance: tolerance,
+          confidence: confidence
+        };
+      }
+
+      // 如果有entry字段（来自其他格式）
+      if (typeof zone.entry === 'number') {
+        return {
+          price: zone.entry,
+          tolerance: zone.tolerance || zone.entry * 0.005, // 默认0.5%容差
+          confidence: zone.confidence || 0.7
+        };
+      }
+
+      // 兜底处理：如果格式不匹配，记录警告并跳过
+      this.logger.warn(`未知的区间格式: ${JSON.stringify(zone)}`);
+      return null;
+    }).filter(zone => zone !== null);
+  }
+
+  /**
+   * 手动触发分析
+   */
+  async triggerManualAnalysis(symbol?: string): Promise<void> {
+    this.logger.log(`手动触发分析: ${symbol || '所有交易对'}`);
+    
+    if (symbol) {
+      // 分析指定交易对
+      const config = await this.coinConfigService.findBySymbol(symbol);
+      if (!config) {
+        throw new Error(`未找到交易对配置: ${symbol}`);
+      }
+      await this.analyzeSymbol(config.symbol, config.interval);
+    } else {
+      // 分析所有活跃交易对
+      await this.executeScheduledAnalysis();
+    }
+  }
+
+  /**
    * 生成分析摘要
    */
   private generateAnalysisSummary(
@@ -167,26 +241,6 @@ export class ScheduledAnalysisService {
     return `技术分析: ${signal} (置信度: ${(confidence * 100).toFixed(1)}%)，` +
            `趋势评分: ${trendScore}，` +
            `发现 ${buyZoneCount} 个买入区间，${sellZoneCount} 个卖出区间`;
-  }
-
-  /**
-   * 手动触发分析（用于测试）
-   */
-  async triggerManualAnalysis(symbol?: string): Promise<void> {
-    this.logger.log(`手动触发技术分析: ${symbol || '所有交易对'}`);
-    
-    if (symbol) {
-      // 分析单个交易对，找到第一个匹配的配置
-      const configs = await this.coinConfigService.findAll({ symbol });
-      const config = configs.find(c => c.isActive);
-      if (!config) {
-        throw new Error(`未找到交易对 ${symbol} 的活跃配置`);
-      }
-      await this.analyzeSymbol(config.symbol, config.interval);
-    } else {
-      // 分析所有交易对
-      await this.executeScheduledAnalysis();
-    }
   }
 
   /**

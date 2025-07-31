@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TelegramBotService, BotStatus, SendMessageResult } from 'src/modules/telegram-bot';
 import { TriggerEvent } from '../interfaces';
+import { CrossingEvent } from './price-trigger-detection.service';
 
 /**
  * 交易通知服务
@@ -204,6 +205,67 @@ ${icons[status.type]} <b>系统${typeNames[status.type]}</b>
 ⏰ <b>时间:</b> ${new Date(timestamp).toLocaleString('zh-CN')}
 
 #系统通知 #${status.type}
+    `.trim();
+
+    return message;
+  }
+
+  /**
+   * 发送区间穿越通知
+   */
+  async sendZoneCrossingNotification(crossingEvent: CrossingEvent): Promise<boolean> {
+    try {
+      const message = this.formatZoneCrossingMessage(crossingEvent);
+      
+      const result = await this.telegramBotService.sendToDefaultChat(message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        disable_notification: false,
+      });
+
+      if (result.success) {
+        this.logger.log(`区间穿越通知发送成功: ${crossingEvent.symbol} ${crossingEvent.crossingType} ${crossingEvent.triggerType}`);
+      } else {
+        this.logger.error(`区间穿越通知发送失败: ${crossingEvent.symbol} ${crossingEvent.crossingType} ${crossingEvent.triggerType} - ${result.error}`);
+      }
+
+      return result.success;
+
+    } catch (error) {
+      this.logger.error(`发送区间穿越通知异常: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * 格式化区间穿越消息
+   */
+  private formatZoneCrossingMessage(crossingEvent: CrossingEvent): string {
+    const { symbol, triggerType, currentPrice, targetPrice, tolerance, confidence, timestamp, crossingType } = crossingEvent;
+    
+    // 根据穿越类型选择图标和文本
+    const crossingIcon = crossingType === 'ENTER' ? '🎯' : '⬅️';
+    const crossingText = crossingType === 'ENTER' ? '进入' : '离开';
+    const typeIcon = triggerType === 'BUY' ? '💚' : '🔴';
+    const zoneText = triggerType === 'BUY' ? '买入区间' : '卖出区间';
+    
+    // 计算价格偏差
+    const priceDeviation = ((currentPrice - targetPrice) / targetPrice * 100).toFixed(2);
+    
+    const message = `
+${crossingIcon} <b>区间穿越</b> ${typeIcon}
+
+📊 <b>交易对:</b> ${symbol}
+🎯 <b>事件:</b> ${crossingText}${zoneText}
+💰 <b>当前价格:</b> $${currentPrice.toFixed(6)}
+🎯 <b>区间中心:</b> $${targetPrice.toFixed(6)}
+📈 <b>偏差:</b> ${priceDeviation}%
+⚡ <b>容差:</b> ${(tolerance * 100).toFixed(2)}%
+🎯 <b>置信度:</b> ${(confidence * 100).toFixed(1)}%
+
+⏰ <b>时间:</b> ${new Date(timestamp).toLocaleString('zh-CN')}
+
+#区间穿越 #${symbol.replace('/', '')} #${triggerType} #${crossingType}
     `.trim();
 
     return message;

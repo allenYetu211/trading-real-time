@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 
 // 控制器导入
 import { TradingAutomationController } from './trading-automation.controller';
+import { TradingDebugController } from './controllers/trading-debug.controller';
 
 // 服务导入
 import { ScheduledAnalysisService } from './services/scheduled-analysis.service';
@@ -35,6 +36,7 @@ import { CCXTAnalysisModule } from '../ccxt-analysis/ccxt-analysis.module';
   ],
   controllers: [
     TradingAutomationController,
+    TradingDebugController,
   ],
   providers: [
     // 核心服务

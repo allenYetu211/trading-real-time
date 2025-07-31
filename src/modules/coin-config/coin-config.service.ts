@@ -64,6 +64,16 @@ export class CoinConfigService {
   }
 
   /**
+   * 根据交易对查询配置（返回第一个匹配的）
+   */
+  async findBySymbol(symbol: string) {
+    return await this.prisma.coinConfig.findFirst({
+      where: { symbol },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
    * 根据交易对和时间间隔查询配置
    */
   async findBySymbolAndInterval(symbol: string, interval: string) {
